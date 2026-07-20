@@ -12,6 +12,25 @@ enum Role {
   ADMIN
 }
 
+// The two independently bookable resources. The whole resort is rented
+// exclusively per date/slot; the function hall can be booked on its own.
+enum ResourceType {
+  RESORT
+  FUNCTION_HALL
+}
+
+// A booking occupies one or more "periods" of a date:
+//   DAY       -> { day }
+//   NIGHT     -> { night }
+//   OVERNIGHT -> { day, night }  (blocks the whole date)
+// Two bookings on the same resource + date conflict only if their
+// period sets intersect. See src/lib/booking.ts for the rule.
+enum BookingSlot {
+  DAY
+  NIGHT
+  OVERNIGHT
+}
+
 enum BookingStatus {
   PENDING
   CONFIRMED
@@ -19,45 +38,34 @@ enum BookingStatus {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String
-  email         String    @unique
-  passwordHash  String
-  role          Role      @default(GUEST)
-  createdAt     DateTime  @default(now())
-  bookings      Booking[]
-}
-
-model Room {
-  id          String     @id @default(cuid())
-  name        String
-  type        String
-  capacity    Int
-  basePrice   Decimal
-  createdAt   DateTime   @default(now())
-  bookings    Booking[]
-  ratePlans   RatePlan[]
-}
-
-model RatePlan {
-  id        String   @id @default(cuid())
-  roomId    String
-  room      Room     @relation(fields: [roomId], references: [id])
-  startDate DateTime
-  endDate   DateTime
-  price     Decimal
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(GUEST)
+  createdAt    DateTime  @default(now())
+  bookings     Booking[]
 }
 
 model Booking {
-  id        String        @id @default(cuid())
-  userId    String
-  user      User          @relation(fields: [userId], references: [id])
-  roomId    String
-  room      Room          @relation(fields: [roomId], references: [id])
-  checkIn   DateTime
-  checkOut  DateTime
-  status    BookingStatus @default(PENDING)
-  createdAt DateTime      @default(now())
+  id       String        @id @default(cuid())
+  resource ResourceType  @default(RESORT)
+  date     DateTime      @db.Date
+  slot     BookingSlot
+  status   BookingStatus @default(CONFIRMED)
 
-  @@index([roomId, checkIn, checkOut])
+  // Guest details captured by staff at reservation time. Rates are kept
+  // external and are intentionally not stored or displayed here.
+  guestName  String
+  guestPhone String?
+  guestEmail String?
+  pax        Int?
+  notes      String?
+
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([resource, date])
 }

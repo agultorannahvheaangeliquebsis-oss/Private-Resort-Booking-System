@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+/*
+  Fabian's Azzure Private Resort — brand theme.
+  Palette drawn from the logo & marketing materials:
+    - Deep navy blue   (primary / text / headers)
+    - Sunset yellow-orange (accent / calls-to-action / highlights)
+    - Light sky blue   (airy background)
+*/
+@theme {
+  /* Navy */
+  --color-navy-50: #eef3fb;
+  --color-navy-100: #d5e1f4;
+  --color-navy-200: #aac2e8;
+  --color-navy-300: #6e93d3;
+  --color-navy-400: #3a63ad;
+  --color-navy-500: #1b4384;
+  --color-navy-600: #0f316b;
+  --color-navy-700: #0b2b57;
+  --color-navy-800: #081f42;
+  --color-navy-900: #05152e;
+
+  /* Sunset (warm yellow-orange) */
+  --color-sunset-50: #fff7e8;
+  --color-sunset-100: #ffe9c2;
+  --color-sunset-200: #ffd485;
+  --color-sunset-300: #fdbe4d;
+  --color-sunset-400: #f6a623;
+  --color-sunset-500: #e8890b;
+  --color-sunset-600: #c26c06;
+  --color-sunset-700: #94510a;
+
+  /* Sky (airy background blues) */
+  --color-sky-bg: #eaf5fc;
+  --color-sky-panel: #d6ecfa;
+  --color-sky-border: #bfe0f5;
+
+  --color-background: var(--color-sky-bg);
+  --color-foreground: var(--color-navy-800);
+
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 1rem;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background-color: var(--color-sky-bg);
+  color: var(--color-navy-800);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle branded gradient wash for the app background */
+.brand-app-bg {
+  background:
+    radial-gradient(1200px 500px at 100% -10%, rgba(246, 166, 35, 0.10), transparent 60%),
+    radial-gradient(1000px 600px at -10% 110%, rgba(15, 49, 107, 0.10), transparent 55%),
+    var(--color-sky-bg);
+}
