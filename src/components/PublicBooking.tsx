@@ -41,6 +41,9 @@ const SLOT_SHORT: Record<BookingSlot, string> = {
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// Two taps on the same cell within this window count as a double-tap.
+const DOUBLE_TAP_MS = 350;
+
 const inputClass =
   "rounded-lg border border-sky-border bg-white px-3 py-2 text-sm text-navy-800 outline-none transition focus:border-navy-400 focus:ring-2 focus:ring-navy-200";
 
@@ -305,6 +308,99 @@ function RequestForm({
   );
 }
 
+// --- Selected-date availability --------------------------------------------
+
+/**
+ * Booked/open state for a single date — shared by the desktop side panel
+ * and the mobile double-tap sheet so the two stay in sync for free.
+ */
+function SelectedDatePanel({
+  date,
+  isPast,
+  booked,
+  openSlots,
+  onRequest,
+  hideHeader,
+}: {
+  date: string;
+  isPast: boolean;
+  booked: PublicBookingLite[];
+  openSlots: BookingSlot[];
+  onRequest: () => void;
+  hideHeader?: boolean;
+}) {
+  return (
+    <>
+      {!hideHeader && (
+        <>
+          <h3 className="text-base font-extrabold text-navy-800">
+            {formatLongDate(date)}
+          </h3>
+          <p className="mb-4 text-xs text-navy-400">
+            {isPast ? "This date has passed." : "Availability"}
+          </p>
+        </>
+      )}
+
+      <div className="rounded-lg border border-sky-border bg-sky-bg/60 p-3">
+        <span className="text-sm font-bold text-navy-700">Whole Resort</span>
+
+        {booked.length > 0 && (
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {booked.map((b, i) => (
+              <li
+                key={i}
+                className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 text-xs"
+              >
+                <span className="font-semibold text-navy-700">
+                  {SLOT_LABELS[b.slot]}
+                  <span className="ml-1 font-normal text-navy-400">
+                    {blockTime(b)}
+                  </span>
+                </span>
+                <span
+                  className={[
+                    "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+                    b.status === "CONFIRMED"
+                      ? "bg-navy-100 text-navy-600"
+                      : "bg-amber-100 text-amber-700",
+                  ].join(" ")}
+                >
+                  {b.status === "CONFIRMED" ? "Booked" : "On hold"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {openSlots.length > 0 ? (
+            openSlots.map((s) => (
+              <span
+                key={s}
+                className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+              >
+                {SLOT_LABELS[s]} open
+              </span>
+            ))
+          ) : (
+            <span className="text-xs text-navy-400">Fully booked.</span>
+          )}
+        </div>
+
+        {!isPast && openSlots.length > 0 && (
+          <button
+            onClick={onRequest}
+            className="mt-3 w-full rounded-lg bg-navy-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-navy-800"
+          >
+            Request the Resort
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
 // --- Main public view -----------------------------------------------------
 
 export function PublicBooking({
@@ -328,6 +424,7 @@ export function PublicBooking({
 
   const [selected, setSelected] = useState(defaultSelected);
   const [formOpen, setFormOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   // Reset the selected day when the visible month changes (render-time pattern).
   const ymKey = `${year}-${month0}`;
@@ -359,6 +456,9 @@ export function PublicBooking({
   }, [bookings, cells]);
 
   const isPast = selected < today;
+  const selectedBooked = coverByDate.get(selected) ?? [];
+  const selectedOpenSlots = availableSlotsOn(selected, occupancy);
+  const canRequestSelected = !isPast && selectedOpenSlots.length > 0;
 
   function goMonth(delta: number) {
     const d = new Date(Date.UTC(year, month0 + delta, 1));
@@ -380,6 +480,27 @@ export function PublicBooking({
     const dy = t.clientY - start.y;
     if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
     goMonth(dx < 0 ? 1 : -1);
+  }
+
+  // Single tap selects. A second tap on the same cell within DOUBLE_TAP_MS
+  // opens the detail sheet. The sheet is `lg:hidden`, so on desktop this is
+  // a harmless no-op and the side panel (always visible there) stays put.
+  const lastTapKeyRef = useRef<string | null>(null);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function handleCellActivate(key: string) {
+    setSelected(key);
+    if (lastTapKeyRef.current === key) {
+      lastTapKeyRef.current = null;
+      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = null;
+      setSheetOpen(true);
+      return;
+    }
+    lastTapKeyRef.current = key;
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = setTimeout(() => {
+      lastTapKeyRef.current = null;
+    }, DOUBLE_TAP_MS);
   }
 
   return (
@@ -412,9 +533,9 @@ export function PublicBooking({
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Calendar */}
           <section className="lg:col-span-2">
-            <div className="rounded-card border border-sky-border bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5">
+            <div className="rounded-card border border-sky-border bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5 md:p-6">
               <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-extrabold text-navy-800">
+                <h2 className="text-lg font-extrabold text-navy-800 sm:text-xl">
                   {monthLabel(year, month0)}
                 </h2>
                 <div className="flex items-center gap-1.5">
@@ -457,14 +578,14 @@ export function PublicBooking({
               </div>
 
               <div
-                className="grid grid-cols-7 gap-1 touch-pan-y"
+                className="grid grid-cols-7 gap-1 touch-pan-y sm:gap-1.5 md:gap-2"
                 onTouchStart={onTouchStart}
                 onTouchEnd={onTouchEnd}
               >
                 {WEEKDAYS.map((w) => (
                   <div
                     key={w}
-                    className="py-1 text-center text-[11px] font-bold uppercase tracking-wide text-navy-400"
+                    className="py-1 text-center text-[11px] font-bold uppercase tracking-wide text-navy-400 sm:py-1.5 sm:text-xs"
                   >
                     {w}
                   </div>
@@ -487,9 +608,9 @@ export function PublicBooking({
                   return (
                     <button
                       key={cell.key}
-                      onClick={() => setSelected(cell.key)}
+                      onClick={() => handleCellActivate(cell.key)}
                       className={[
-                        "flex min-h-[64px] flex-col rounded-lg border p-1.5 text-left transition sm:min-h-[80px]",
+                        "flex min-h-18 flex-col rounded-lg border p-1.5 text-left transition sm:min-h-22 sm:p-2 md:min-h-26 lg:min-h-30",
                         tint,
                         isSelected
                           ? "border-navy-500 ring-2 ring-navy-300"
@@ -500,7 +621,7 @@ export function PublicBooking({
                     >
                       <span
                         className={[
-                          "mb-1 inline-flex h-5 w-5 items-center justify-center text-xs font-bold",
+                          "mb-1 inline-flex h-6 w-6 items-center justify-center text-xs font-bold sm:h-7 sm:w-7 sm:text-sm",
                           isToday
                             ? "rounded-full bg-navy-700 text-white"
                             : "text-navy-700",
@@ -512,7 +633,7 @@ export function PublicBooking({
                         {dayBookings.map((b, i) => (
                           <span
                             key={i}
-                            className="truncate rounded bg-navy-200 px-1 text-[10px] font-semibold leading-tight text-navy-700"
+                            className="truncate rounded bg-navy-200 px-1 py-0.5 text-[10px] font-semibold leading-tight text-navy-700 sm:text-[11px]"
                           >
                             {SLOT_SHORT[b.slot]}
                           </span>
@@ -525,115 +646,103 @@ export function PublicBooking({
             </div>
           </section>
 
-          {/* Selected-date panel */}
-          <section>
-            <div className="rounded-card border border-sky-border bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5">
-              <h3 className="text-base font-extrabold text-navy-800">
-                {formatLongDate(selected)}
-              </h3>
-              <p className="mb-4 text-xs text-navy-400">
-                {isPast ? "This date has passed." : "Availability"}
-              </p>
-
-              {(() => {
-                const booked = coverByDate.get(selected) ?? [];
-                const openSlots = availableSlotsOn(selected, occupancy);
-                return (
-                  <div className="rounded-lg border border-sky-border bg-sky-bg/60 p-3">
-                    <span className="text-sm font-bold text-navy-700">
-                      Whole Resort
-                    </span>
-
-                    {booked.length > 0 && (
-                      <ul className="mt-2 flex flex-col gap-1.5">
-                        {booked.map((b, i) => (
-                          <li
-                            key={i}
-                            className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 text-xs"
-                          >
-                            <span className="font-semibold text-navy-700">
-                              {SLOT_LABELS[b.slot]}
-                              <span className="ml-1 font-normal text-navy-400">
-                                {blockTime(b)}
-                              </span>
-                            </span>
-                            <span
-                              className={[
-                                "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                                b.status === "CONFIRMED"
-                                  ? "bg-navy-100 text-navy-600"
-                                  : "bg-amber-100 text-amber-700",
-                              ].join(" ")}
-                            >
-                              {b.status === "CONFIRMED" ? "Booked" : "On hold"}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      {openSlots.length > 0 ? (
-                        openSlots.map((s) => (
-                          <span
-                            key={s}
-                            className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                          >
-                            {SLOT_LABELS[s]} open
-                          </span>
-                        ))
-                      ) : (
-                        <span className="text-xs text-navy-400">
-                          Fully booked.
-                        </span>
-                      )}
-                    </div>
-
-                    {!isPast && openSlots.length > 0 && (
-                      <button
-                        onClick={() => setFormOpen(true)}
-                        className="mt-3 w-full rounded-lg bg-navy-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-navy-800"
-                      >
-                        Request the Resort
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
+          {/* Selected-date panel — desktop only; mobile uses the double-tap sheet */}
+          <section className="hidden lg:block">
+            <div className="rounded-card border border-sky-border bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5 md:p-6">
+              <SelectedDatePanel
+                date={selected}
+                isPast={isPast}
+                booked={selectedBooked}
+                openSlots={selectedOpenSlots}
+                onRequest={() => setFormOpen(true)}
+              />
             </div>
           </section>
         </div>
       </main>
 
-      {/* Request modal */}
-      {formOpen && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-navy-900/40 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setFormOpen(false);
-          }}
-        >
-          <div className="w-full max-w-md rounded-card border border-sky-border bg-white p-5 shadow-2xl">
+      {/* Floating action button — quick request, always reachable */}
+      <button
+        onClick={() => setFormOpen(true)}
+        disabled={!canRequestSelected}
+        aria-label="Request a booking"
+        title={
+          canRequestSelected
+            ? "Request a booking"
+            : "Select an open date to request a booking"
+        }
+        className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-sunset-400 text-3xl font-bold leading-none text-navy-900 shadow-lg shadow-navy-900/25 transition hover:bg-sunset-500 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        +
+      </button>
+
+      {/* Mobile double-tap sheet */}
+      {sheetOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div
+            className="absolute inset-0 bg-navy-900/40 backdrop-blur-sm"
+            onClick={() => setSheetOpen(false)}
+          />
+          <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-3xl border-t border-sky-border bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl animate-sheet-up">
+            <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-sky-border" />
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-extrabold text-navy-800">
-                Request a booking
+              <h3 className="text-base font-extrabold text-navy-800">
+                {formatLongDate(selected)}
               </h3>
               <button
-                onClick={() => setFormOpen(false)}
+                onClick={() => setSheetOpen(false)}
                 className="text-navy-400 hover:text-navy-700"
                 aria-label="Close"
               >
                 ✕
               </button>
             </div>
-            <RequestForm
-              initialDate={selected}
-              occupancy={occupancy}
-              onDone={() => {
-                setFormOpen(false);
-                router.refresh();
+            <SelectedDatePanel
+              date={selected}
+              isPast={isPast}
+              booked={selectedBooked}
+              openSlots={selectedOpenSlots}
+              onRequest={() => {
+                setSheetOpen(false);
+                setFormOpen(true);
               }}
+              hideHeader
             />
+          </div>
+        </div>
+      )}
+
+      {/* Request modal */}
+      {formOpen && (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto bg-navy-900/40 p-4 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setFormOpen(false);
+          }}
+        >
+          <div className="flex min-h-full items-center justify-center">
+            <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-card border border-sky-border bg-white p-5 shadow-2xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-lg font-extrabold text-navy-800">
+                  Request a booking
+                </h3>
+                <button
+                  onClick={() => setFormOpen(false)}
+                  className="text-navy-400 hover:text-navy-700"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+              <RequestForm
+                initialDate={selected}
+                occupancy={occupancy}
+                onDone={() => {
+                  setFormOpen(false);
+                  router.refresh();
+                }}
+              />
+            </div>
           </div>
         </div>
       )}

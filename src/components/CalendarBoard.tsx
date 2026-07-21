@@ -47,6 +47,9 @@ const SLOT_SHORT: Record<BookingSlot, string> = {
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// Two taps on the same cell within this window count as a double-tap.
+const DOUBLE_TAP_MS = 350;
+
 const asOccupancy = (b: BookingLite): Occupancy => ({
   date: b.date,
   endDate: b.endDate,
@@ -71,6 +74,127 @@ function dateRange(b: BookingLite): string {
   return `${formatShortDate(b.date)} → ${formatShortDate(b.endDate)} · ${nights} night${nights > 1 ? "s" : ""}`;
 }
 
+/**
+ * Booked/empty state for a single date — shared by the desktop side panel
+ * and the mobile double-tap sheet so the two stay in sync for free.
+ */
+function SelectedDatePanel({
+  date,
+  bookings,
+  occupancy,
+  onAdd,
+  onRefresh,
+  hideHeader,
+}: {
+  date: string;
+  bookings: BookingLite[];
+  occupancy: Occupancy[];
+  onAdd: () => void;
+  onRefresh: () => void;
+  hideHeader?: boolean;
+}) {
+  const openSlots = availableSlotsOn(date, occupancy);
+
+  return (
+    <>
+      {!hideHeader && (
+        <>
+          <h3 className="text-base font-extrabold text-navy-800">
+            {formatLongDate(date)}
+          </h3>
+          <p className="mb-4 text-xs text-navy-400">
+            {bookings.length === 0
+              ? "No reservations yet."
+              : `${bookings.length} reservation${bookings.length > 1 ? "s" : ""}`}
+          </p>
+        </>
+      )}
+
+      <div className="rounded-lg border border-sky-border bg-sky-bg/60 p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-sm font-bold text-navy-700">Whole Resort</span>
+          <button
+            onClick={onAdd}
+            disabled={openSlots.length === 0}
+            className="rounded-lg bg-navy-700 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            + Add
+          </button>
+        </div>
+
+        {bookings.length === 0 ? (
+          <p className="text-xs text-navy-400">Available.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {bookings.map((b) => {
+              const times = timeRange(b);
+              return (
+                <li
+                  key={b.id}
+                  className="rounded-lg border border-sky-border bg-white p-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-navy-800">
+                        {b.guestName}
+                        {b.source === "GUEST" && (
+                          <span className="ml-1.5 rounded bg-sky-panel px-1 text-[9px] font-bold uppercase text-navy-500">
+                            Guest
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-xs text-navy-500">
+                        {SLOT_LABELS[b.slot]}
+                        {b.pax ? ` · ${b.pax} pax` : ""}
+                        {b.functionHallAircon ? " · Hall + aircon" : ""}
+                      </p>
+                      <p className="text-xs text-navy-400">{dateRange(b)}</p>
+                      <p className="text-xs font-medium text-navy-500">
+                        {times ?? "Time to be set"}
+                      </p>
+                      {b.guestPhone && (
+                        <p className="text-xs text-navy-400">{b.guestPhone}</p>
+                      )}
+                      {b.notes && (
+                        <p className="mt-1 text-xs italic text-navy-400">
+                          {b.notes}
+                        </p>
+                      )}
+                    </div>
+                    <StatusBadge status={b.status} />
+                  </div>
+
+                  {b.status === "PENDING" ? (
+                    <ConfirmControl booking={b} onDone={onRefresh} />
+                  ) : (
+                    <form action={cancelBooking} className="mt-2 text-right">
+                      <input type="hidden" name="id" value={b.id} />
+                      <button
+                        type="submit"
+                        onClick={(e) => {
+                          if (
+                            !window.confirm(
+                              `Cancel ${b.guestName}'s reservation?`
+                            )
+                          )
+                            e.preventDefault();
+                        }}
+                        className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
+                      >
+                        Cancel reservation
+                      </button>
+                    </form>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function CalendarBoard({
   year,
   month0,
@@ -92,6 +216,8 @@ export function CalendarBoard({
 
   const [selected, setSelected] = useState(defaultSelected);
   const [modal, setModal] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [slideDir, setSlideDir] = useState<"forward" | "back">("forward");
 
   // Reset the selected day when the visible month changes. Adjusting state
   // during render (not in an effect) is React's recommended pattern here.
@@ -116,10 +242,20 @@ export function CalendarBoard({
 
   const selectedBookings = coverByDate.get(selected) ?? [];
 
+  function navigateToMonth(targetYear: number, targetMonth0: number) {
+    if (targetYear === year && targetMonth0 === month0) return;
+    setSlideDir(
+      targetYear > year || (targetYear === year && targetMonth0 > month0)
+        ? "forward"
+        : "back"
+    );
+    const key = `${targetYear}-${String(targetMonth0 + 1).padStart(2, "0")}`;
+    router.push(`/dashboard/calendar?ym=${key}`);
+  }
+
   function goMonth(delta: number) {
     const d = new Date(Date.UTC(year, month0 + delta, 1));
-    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    router.push(`/dashboard/calendar?ym=${key}`);
+    navigateToMonth(d.getUTCFullYear(), d.getUTCMonth());
   }
 
   const touchStart = useRef<{ x: number; y: number } | null>(null);
@@ -138,6 +274,28 @@ export function CalendarBoard({
     goMonth(dx < 0 ? 1 : -1);
   }
 
+  // Single tap selects (mouse or touch — both fire onClick). A second tap on
+  // the same cell within DOUBLE_TAP_MS opens the detail sheet. The sheet's
+  // own markup is `lg:hidden`, so on desktop this is a harmless no-op and
+  // the side panel (always visible there) stays the source of truth.
+  const lastTapKeyRef = useRef<string | null>(null);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function handleCellActivate(key: string) {
+    setSelected(key);
+    if (lastTapKeyRef.current === key) {
+      lastTapKeyRef.current = null;
+      if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+      tapTimerRef.current = null;
+      setSheetOpen(true);
+      return;
+    }
+    lastTapKeyRef.current = key;
+    if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = setTimeout(() => {
+      lastTapKeyRef.current = null;
+    }, DOUBLE_TAP_MS);
+  }
+
   function refresh() {
     router.refresh();
   }
@@ -150,9 +308,9 @@ export function CalendarBoard({
     <div className="grid gap-6 lg:grid-cols-3">
       {/* Calendar */}
       <section className="lg:col-span-2">
-        <div className="rounded-card border border-sky-border bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5">
+        <div className="rounded-card border border-sky-border bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5 md:p-6">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-extrabold text-navy-800">
+            <h2 className="text-lg font-extrabold text-navy-800 sm:text-xl">
               {monthLabel(year, month0)}
             </h2>
             <div className="flex items-center gap-1.5">
@@ -164,7 +322,10 @@ export function CalendarBoard({
                 ‹
               </button>
               <button
-                onClick={() => router.push("/dashboard/calendar")}
+                onClick={() => {
+                  const [ty, tm] = today.split("-").map(Number);
+                  navigateToMonth(ty, tm - 1);
+                }}
                 className="rounded-lg border border-sky-border bg-white px-3 py-1.5 text-sm font-semibold text-navy-700 transition hover:bg-sky-panel"
               >
                 Today
@@ -193,226 +354,187 @@ export function CalendarBoard({
               <span className="h-3 w-3 rounded bg-navy-100 ring-1 ring-navy-300" />
               Fully booked
             </span>
+            <span className="ml-auto hidden text-[11px] text-navy-400 lg:inline">
+              Double-tap a date for details
+            </span>
           </div>
 
           <div
-            className="grid grid-cols-7 gap-1 touch-pan-y"
+            className="overflow-hidden touch-pan-y"
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
           >
-            {WEEKDAYS.map((w) => (
-              <div
-                key={w}
-                className="py-1 text-center text-[11px] font-bold uppercase tracking-wide text-navy-400"
-              >
-                {w}
-              </div>
-            ))}
-
-            {cells.map((cell) => {
-              const dayBookings = coverByDate.get(cell.key) ?? [];
-              const resortAvail = availabilityOn(cell.key, occupancy);
-
-              const isSelected = cell.key === selected;
-              const isToday = cell.key === today;
-
-              const tint =
-                resortAvail === "full"
-                  ? "bg-navy-100"
-                  : resortAvail === "partial"
-                    ? "bg-sunset-50"
-                    : "bg-white";
-
-              return (
-                <button
-                  key={cell.key}
-                  onClick={() => setSelected(cell.key)}
-                  className={[
-                    "flex min-h-[68px] flex-col rounded-lg border p-1.5 text-left transition sm:min-h-[84px]",
-                    tint,
-                    isSelected
-                      ? "border-navy-500 ring-2 ring-navy-300"
-                      : "border-sky-border hover:border-navy-300",
-                    cell.inMonth ? "" : "opacity-40",
-                  ].join(" ")}
+            <div
+              key={ymKey}
+              className={[
+                "grid grid-cols-7 gap-1 sm:gap-1.5 md:gap-2",
+                slideDir === "forward" ? "animate-cal-forward" : "animate-cal-back",
+              ].join(" ")}
+            >
+              {WEEKDAYS.map((w) => (
+                <div
+                  key={w}
+                  className="py-1 text-center text-[11px] font-bold uppercase tracking-wide text-navy-400 sm:py-1.5 sm:text-xs"
                 >
-                  <span
+                  {w}
+                </div>
+              ))}
+
+              {cells.map((cell) => {
+                const dayBookings = coverByDate.get(cell.key) ?? [];
+                const resortAvail = availabilityOn(cell.key, occupancy);
+
+                const isSelected = cell.key === selected;
+                const isToday = cell.key === today;
+
+                const tint =
+                  resortAvail === "full"
+                    ? "bg-navy-100"
+                    : resortAvail === "partial"
+                      ? "bg-sunset-50"
+                      : "bg-white";
+
+                return (
+                  <button
+                    key={cell.key}
+                    onClick={() => handleCellActivate(cell.key)}
                     className={[
-                      "mb-1 inline-flex h-5 w-5 items-center justify-center text-xs font-bold",
-                      isToday
-                        ? "rounded-full bg-navy-700 text-white"
-                        : "text-navy-700",
+                      "flex min-h-19.5 flex-col rounded-lg border p-1.5 text-left transition sm:min-h-24 sm:p-2 md:min-h-27.5 lg:min-h-30.5",
+                      tint,
+                      isSelected
+                        ? "border-navy-500 ring-2 ring-navy-300"
+                        : "border-sky-border hover:border-navy-300",
+                      cell.inMonth ? "" : "opacity-40",
                     ].join(" ")}
                   >
-                    {cell.day}
-                  </span>
-                  <span className="flex flex-col gap-0.5">
-                    {dayBookings.map((b) => {
-                      const multi = b.date !== b.endDate;
-                      const cont =
-                        multi && b.date !== cell.key ? "‹ " : "";
-                      const tail =
-                        multi && b.endDate !== cell.key ? " ›" : "";
-                      return (
-                        <span
-                          key={b.id}
-                          className={[
-                            "truncate rounded bg-navy-600 px-1 text-[10px] font-semibold leading-tight text-white",
-                            b.status === "PENDING" ? "opacity-60" : "",
-                          ].join(" ")}
-                        >
-                          {cont}
-                          {SLOT_SHORT[b.slot]}
-                          {b.functionHallAircon ? " ❄" : ""}
-                          {tail}
-                        </span>
-                      );
-                    })}
-                  </span>
-                </button>
-              );
-            })}
+                    <span
+                      className={[
+                        "mb-1 inline-flex h-6 w-6 items-center justify-center text-xs font-bold sm:h-7 sm:w-7 sm:text-sm",
+                        isToday
+                          ? "rounded-full bg-navy-700 text-white"
+                          : "text-navy-700",
+                      ].join(" ")}
+                    >
+                      {cell.day}
+                    </span>
+                    <span className="flex flex-col gap-0.5">
+                      {dayBookings.map((b) => {
+                        const multi = b.date !== b.endDate;
+                        const cont =
+                          multi && b.date !== cell.key ? "‹ " : "";
+                        const tail =
+                          multi && b.endDate !== cell.key ? " ›" : "";
+                        return (
+                          <span
+                            key={b.id}
+                            className={[
+                              "truncate rounded bg-navy-600 px-1 py-0.5 text-[10px] font-semibold leading-tight text-white sm:text-[11px]",
+                              b.status === "PENDING" ? "opacity-60" : "",
+                            ].join(" ")}
+                          >
+                            {cont}
+                            {SLOT_SHORT[b.slot]}
+                            {b.functionHallAircon ? " ❄" : ""}
+                            {tail}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </section>
 
-      {/* Selected-date panel */}
-      <section>
-        <div className="rounded-card border border-sky-border bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5">
-          <h3 className="text-base font-extrabold text-navy-800">
-            {formatLongDate(selected)}
-          </h3>
-          <p className="mb-4 text-xs text-navy-400">
-            {selectedBookings.length === 0
-              ? "No reservations yet."
-              : `${selectedBookings.length} reservation${selectedBookings.length > 1 ? "s" : ""}`}
-          </p>
-
-          {(() => {
-            const openSlots = availableSlotsOn(selected, occupancy);
-            return (
-              <div className="rounded-lg border border-sky-border bg-sky-bg/60 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-bold text-navy-700">
-                    Whole Resort
-                  </span>
-                  <button
-                    onClick={() => setModal(true)}
-                    disabled={openSlots.length === 0}
-                    className="rounded-lg bg-navy-700 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    + Add
-                  </button>
-                </div>
-
-                {selectedBookings.length === 0 ? (
-                  <p className="text-xs text-navy-400">Available.</p>
-                ) : (
-                  <ul className="flex flex-col gap-2">
-                    {selectedBookings.map((b) => {
-                      const times = timeRange(b);
-                      return (
-                        <li
-                          key={b.id}
-                          className="rounded-lg border border-sky-border bg-white p-2.5"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-navy-800">
-                                {b.guestName}
-                                {b.source === "GUEST" && (
-                                  <span className="ml-1.5 rounded bg-sky-panel px-1 text-[9px] font-bold uppercase text-navy-500">
-                                    Guest
-                                  </span>
-                                )}
-                              </p>
-                              <p className="text-xs text-navy-500">
-                                {SLOT_LABELS[b.slot]}
-                                {b.pax ? ` · ${b.pax} pax` : ""}
-                                {b.functionHallAircon ? " · Hall + aircon" : ""}
-                              </p>
-                              <p className="text-xs text-navy-400">
-                                {dateRange(b)}
-                              </p>
-                              <p className="text-xs font-medium text-navy-500">
-                                {times ?? "Time to be set"}
-                              </p>
-                              {b.guestPhone && (
-                                <p className="text-xs text-navy-400">
-                                  {b.guestPhone}
-                                </p>
-                              )}
-                              {b.notes && (
-                                <p className="mt-1 text-xs italic text-navy-400">
-                                  {b.notes}
-                                </p>
-                              )}
-                            </div>
-                            <StatusBadge status={b.status} />
-                          </div>
-
-                          {b.status === "PENDING" ? (
-                            <ConfirmControl booking={b} onDone={refresh} />
-                          ) : (
-                            <form
-                              action={cancelBooking}
-                              className="mt-2 text-right"
-                            >
-                              <input type="hidden" name="id" value={b.id} />
-                              <button
-                                type="submit"
-                                onClick={(e) => {
-                                  if (
-                                    !window.confirm(
-                                      `Cancel ${b.guestName}'s reservation?`
-                                    )
-                                  )
-                                    e.preventDefault();
-                                }}
-                                className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
-                              >
-                                Cancel reservation
-                              </button>
-                            </form>
-                          )}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            );
-          })()}
+      {/* Selected-date panel — desktop only; mobile uses the double-tap sheet below */}
+      <section className="hidden lg:block">
+        <div className="rounded-card border border-sky-border bg-white/80 p-4 shadow-sm backdrop-blur sm:p-5 md:p-6">
+          <SelectedDatePanel
+            date={selected}
+            bookings={selectedBookings}
+            occupancy={occupancy}
+            onAdd={() => setModal(true)}
+            onRefresh={refresh}
+          />
         </div>
       </section>
 
-      {/* Booking modal */}
-      {modal && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-navy-900/40 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setModal(false);
-          }}
-        >
-          <div className="w-full max-w-md rounded-card border border-sky-border bg-white p-5 shadow-2xl">
+      {/* Floating action button — quick add, always reachable */}
+      <button
+        onClick={() => setModal(true)}
+        aria-label="New reservation"
+        className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-sunset-400 text-3xl font-bold leading-none text-navy-900 shadow-lg shadow-navy-900/25 transition hover:bg-sunset-500 active:scale-95"
+      >
+        +
+      </button>
+
+      {/* Mobile double-tap sheet */}
+      {sheetOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div
+            className="absolute inset-0 bg-navy-900/40 backdrop-blur-sm"
+            onClick={() => setSheetOpen(false)}
+          />
+          <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-3xl border-t border-sky-border bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl animate-sheet-up">
+            <div className="mx-auto mb-3 h-1.5 w-10 rounded-full bg-sky-border" />
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-lg font-extrabold text-navy-800">
-                New reservation
+              <h3 className="text-base font-extrabold text-navy-800">
+                {formatLongDate(selected)}
               </h3>
               <button
-                onClick={() => setModal(false)}
+                onClick={() => setSheetOpen(false)}
                 className="text-navy-400 hover:text-navy-700"
                 aria-label="Close"
               >
                 ✕
               </button>
             </div>
-            <BookingForm
+            <SelectedDatePanel
               date={selected}
+              bookings={selectedBookings}
               occupancy={occupancy}
-              onSuccess={closeModalAndRefresh}
-              onCancel={() => setModal(false)}
+              onAdd={() => {
+                setSheetOpen(false);
+                setModal(true);
+              }}
+              onRefresh={refresh}
+              hideHeader
             />
+          </div>
+        </div>
+      )}
+
+      {/* Booking modal */}
+      {modal && (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto bg-navy-900/40 p-4 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setModal(false);
+          }}
+        >
+          <div className="flex min-h-full items-center justify-center">
+            <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-card border border-sky-border bg-white p-5 shadow-2xl">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-lg font-extrabold text-navy-800">
+                  New reservation
+                </h3>
+                <button
+                  onClick={() => setModal(false)}
+                  className="text-navy-400 hover:text-navy-700"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+              <BookingForm
+                date={selected}
+                occupancy={occupancy}
+                onSuccess={closeModalAndRefresh}
+                onCancel={() => setModal(false)}
+              />
+            </div>
           </div>
         </div>
       )}

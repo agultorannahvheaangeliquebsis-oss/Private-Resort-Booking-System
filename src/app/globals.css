@@ -60,3 +60,52 @@ body {
     radial-gradient(1000px 600px at -10% 110%, rgba(15, 49, 107, 0.10), transparent 55%),
     var(--color-sky-bg);
 }
+
+/* Directional slide for the calendar month grid (swipe / prev-next nav). */
+@keyframes cal-slide-forward {
+  from {
+    transform: translateX(28px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+@keyframes cal-slide-back {
+  from {
+    transform: translateX(-28px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.animate-cal-forward {
+  animation: cal-slide-forward 220ms ease-out;
+}
+.animate-cal-back {
+  animation: cal-slide-back 220ms ease-out;
+}
+
+/* Bottom sheet entrance for the mobile double-tap date-detail card. */
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.animate-sheet-up {
+  animation: sheet-up 220ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-cal-forward,
+  .animate-cal-back,
+  .animate-sheet-up {
+    animation: none;
+  }
+}
