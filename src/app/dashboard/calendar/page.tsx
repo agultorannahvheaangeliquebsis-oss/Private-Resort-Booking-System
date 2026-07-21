@@ -36,7 +36,6 @@ export default async function CalendarPage({
 
   const bookings: BookingLite[] = rows.map((r) => ({
     id: r.id,
-    resource: r.resource,
     slot: r.slot,
     status: r.status,
     source: r.source,
@@ -44,6 +43,7 @@ export default async function CalendarPage({
     endDate: toDateKey(r.endDate),
     startTime: r.startTime,
     endTime: r.endTime,
+    functionHallAircon: r.functionHallAircon,
     guestName: r.guestName,
     guestPhone: r.guestPhone,
     guestEmail: r.guestEmail,

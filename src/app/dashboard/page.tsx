@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { RESOURCE_LABELS, SLOT_LABELS } from "@/lib/booking";
+import { SLOT_LABELS } from "@/lib/booking";
 import {
   addDaysKey,
   dateKeyToUTC,
@@ -19,7 +19,6 @@ const HORIZON_DAYS = 7;
 
 function toLite(r: {
   id: string;
-  resource: BookingLite["resource"];
   slot: BookingLite["slot"];
   status: BookingLite["status"];
   source: BookingLite["source"];
@@ -27,6 +26,7 @@ function toLite(r: {
   endDate: Date;
   startTime: string | null;
   endTime: string | null;
+  functionHallAircon: boolean;
   guestName: string;
   guestPhone: string | null;
   guestEmail: string | null;
@@ -35,7 +35,6 @@ function toLite(r: {
 }): BookingLite {
   return {
     id: r.id,
-    resource: r.resource,
     slot: r.slot,
     status: r.status,
     source: r.source,
@@ -43,6 +42,7 @@ function toLite(r: {
     endDate: toDateKey(r.endDate),
     startTime: r.startTime,
     endTime: r.endTime,
+    functionHallAircon: r.functionHallAircon,
     guestName: r.guestName,
     guestPhone: r.guestPhone,
     guestEmail: r.guestEmail,
@@ -202,8 +202,9 @@ export default async function DashboardOverview() {
                         {b.guestName}
                       </p>
                       <p className="text-xs font-medium text-navy-600">
-                        {RESOURCE_LABELS[b.resource]} · {SLOT_LABELS[b.slot]}
+                        {SLOT_LABELS[b.slot]}
                         {b.pax ? ` · ${b.pax} pax` : ""}
+                        {b.functionHallAircon ? " · Hall + aircon" : ""}
                       </p>
                       <p className="text-xs text-navy-400">{range}</p>
                     </div>

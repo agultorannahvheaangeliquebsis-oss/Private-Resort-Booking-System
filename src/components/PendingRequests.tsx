@@ -10,11 +10,6 @@ import {
 import { ConfirmControl } from "./ConfirmControl";
 import type { BookingLite } from "./CalendarBoard";
 
-const RESOURCE_SHORT: Record<BookingLite["resource"], string> = {
-  RESORT: "Whole Resort",
-  FUNCTION_HALL: "Function Hall",
-};
-
 function dateRange(b: BookingLite): string {
   if (b.date === b.endDate) return formatLongDate(b.date);
   const nights = nightsBetween(b.date, b.endDate);
@@ -51,8 +46,9 @@ export function PendingRequests({ requests }: { requests: BookingLite[] }) {
                 )}
               </p>
               <p className="text-xs font-medium text-navy-600">
-                {RESOURCE_SHORT[b.resource]} · {SLOT_LABELS[b.slot]}
+                {SLOT_LABELS[b.slot]}
                 {b.pax ? ` · ${b.pax} pax` : ""}
+                {b.functionHallAircon ? " · Hall + aircon" : ""}
               </p>
               <p className="text-xs text-navy-500">{dateRange(b)}</p>
               {b.guestPhone && (

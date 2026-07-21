@@ -2,15 +2,9 @@
 
 import { useActionState, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type {
-  BookingSlot,
-  BookingStatus,
-  ResourceType,
-} from "@prisma/client";
+import type { BookingSlot, BookingStatus } from "@prisma/client";
 import { createRequest, type BookingActionState } from "@/app/actions/bookings";
 import {
-  RESOURCE_LABELS,
-  RESOURCE_TYPES,
   SLOT_LABELS,
   availabilityOn,
   availableSlotsOn,
@@ -29,7 +23,6 @@ import {
 import { Brandmark } from "./Brandmark";
 
 export type PublicBookingLite = {
-  resource: ResourceType;
   slot: BookingSlot;
   status: BookingStatus;
   date: string;
@@ -61,16 +54,13 @@ function blockTime(b: PublicBookingLite): string {
 
 function RequestForm({
   initialDate,
-  occByResource,
-  defaultResource,
+  occupancy,
   onDone,
 }: {
   initialDate: string;
-  occByResource: Map<ResourceType, Occupancy[]>;
-  defaultResource: ResourceType;
+  occupancy: Occupancy[];
   onDone: () => void;
 }) {
-  const [resource, setResource] = useState<ResourceType>(defaultResource);
   const [checkIn, setCheckIn] = useState(initialDate);
   const [checkOut, setCheckOut] = useState(initialDate);
   const [pax, setPax] = useState("1");
@@ -86,10 +76,10 @@ function RequestForm({
   const nights = nightsBetween(checkIn, checkOut);
   const isMultiDay = nights >= 1;
 
-  const openSlots = useMemo(() => {
-    const occ = occByResource.get(resource) ?? [];
-    return availableSlotsOn(checkIn, occ);
-  }, [occByResource, resource, checkIn]);
+  const openSlots = useMemo(
+    () => availableSlotsOn(checkIn, occupancy),
+    [occupancy, checkIn]
+  );
 
   // Keep check-out at or after check-in.
   function onCheckInChange(value: string) {
@@ -156,42 +146,24 @@ function RequestForm({
         </p>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      {!isMultiDay && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold text-navy-700">What</span>
-          <select
-            name="resource"
-            value={resource}
-            onChange={(e) => setResource(e.target.value as ResourceType)}
-            className={inputClass}
-          >
-            {RESOURCE_TYPES.map((r) => (
-              <option key={r} value={r}>
-                {RESOURCE_LABELS[r]}
+          <span className="text-xs font-semibold text-navy-700">
+            Booking type
+          </span>
+          <select name="slot" className={inputClass} disabled={noSlots} required>
+            {openSlots.map((s) => (
+              <option key={s} value={s}>
+                {SLOT_LABELS[s]}
               </option>
             ))}
           </select>
         </label>
-
-        {!isMultiDay && (
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-semibold text-navy-700">
-              Booking type
-            </span>
-            <select name="slot" className={inputClass} disabled={noSlots} required>
-              {openSlots.map((s) => (
-                <option key={s} value={s}>
-                  {SLOT_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-      </div>
+      )}
 
       {noSlots ? (
         <p className="rounded-lg bg-navy-100 px-3 py-2 text-sm font-medium text-navy-700">
-          {RESOURCE_LABELS[resource]} is fully booked that day. Try another date.
+          The resort is fully booked that day. Try another date.
         </p>
       ) : (
         <>
@@ -252,6 +224,23 @@ function RequestForm({
               Email <span className="font-normal text-navy-400">(optional)</span>
             </span>
             <input name="guestEmail" type="email" className={inputClass} />
+          </label>
+
+          <label className="flex items-start gap-2 rounded-lg border border-sky-border bg-sky-panel/40 px-3 py-2.5">
+            <input
+              type="checkbox"
+              name="functionHallAircon"
+              className="mt-0.5 h-4 w-4 rounded border-sky-border text-navy-700 focus:ring-navy-300"
+            />
+            <span className="text-xs text-navy-700">
+              <span className="font-semibold">
+                Use the function hall with air-conditioning
+              </span>
+              <br />
+              <span className="text-navy-500">
+                Additional charges apply.
+              </span>
+            </span>
           </label>
 
           <label className="flex flex-col gap-1.5">
@@ -319,9 +308,7 @@ export function PublicBooking({
   const defaultSelected = todayInMonth ? today : firstInMonth;
 
   const [selected, setSelected] = useState(defaultSelected);
-  const [formOpen, setFormOpen] = useState<null | { resource: ResourceType }>(
-    null
-  );
+  const [formOpen, setFormOpen] = useState(false);
 
   // Reset the selected day when the visible month changes (render-time pattern).
   const ymKey = `${year}-${month0}`;
@@ -331,24 +318,17 @@ export function PublicBooking({
     setSelected(defaultSelected);
   }
 
-  const occByResource = useMemo(() => {
-    const map = new Map<ResourceType, Occupancy[]>();
-    for (const r of RESOURCE_TYPES) {
-      map.set(
-        r,
-        bookings
-          .filter((b) => b.resource === r)
-          .map((b) => ({
-            date: b.date,
-            endDate: b.endDate,
-            slot: b.slot,
-            startTime: b.startTime,
-            endTime: b.endTime,
-          }))
-      );
-    }
-    return map;
-  }, [bookings]);
+  const occupancy = useMemo<Occupancy[]>(
+    () =>
+      bookings.map((b) => ({
+        date: b.date,
+        endDate: b.endDate,
+        slot: b.slot,
+        startTime: b.startTime,
+        endTime: b.endTime,
+      })),
+    [bookings]
+  );
 
   const coverByDate = useMemo(() => {
     const map = new Map<string, PublicBookingLite[]>();
@@ -473,10 +453,7 @@ export function PublicBooking({
 
                 {cells.map((cell) => {
                   const dayBookings = coverByDate.get(cell.key) ?? [];
-                  const avail = availabilityOn(
-                    cell.key,
-                    occByResource.get("RESORT") ?? []
-                  );
+                  const avail = availabilityOn(cell.key, occupancy);
                   const past = cell.key < today;
                   const isSelected = cell.key === selected;
                   const isToday = cell.key === today;
@@ -516,14 +493,8 @@ export function PublicBooking({
                         {dayBookings.map((b, i) => (
                           <span
                             key={i}
-                            className={[
-                              "truncate rounded px-1 text-[10px] font-semibold leading-tight",
-                              b.resource === "FUNCTION_HALL"
-                                ? "bg-sunset-200 text-navy-800"
-                                : "bg-navy-200 text-navy-700",
-                            ].join(" ")}
+                            className="truncate rounded bg-navy-200 px-1 text-[10px] font-semibold leading-tight text-navy-700"
                           >
-                            {b.resource === "FUNCTION_HALL" ? "Hall · " : ""}
                             {SLOT_SHORT[b.slot]}
                           </span>
                         ))}
@@ -545,81 +516,71 @@ export function PublicBooking({
                 {isPast ? "This date has passed." : "Availability"}
               </p>
 
-              <div className="flex flex-col gap-4">
-                {RESOURCE_TYPES.map((resource) => {
-                  const booked = (coverByDate.get(selected) ?? []).filter(
-                    (b) => b.resource === resource
-                  );
-                  const openSlots = availableSlotsOn(
-                    selected,
-                    occByResource.get(resource) ?? []
-                  );
-                  return (
-                    <div
-                      key={resource}
-                      className="rounded-lg border border-sky-border bg-sky-bg/60 p-3"
-                    >
-                      <span className="text-sm font-bold text-navy-700">
-                        {RESOURCE_LABELS[resource]}
-                      </span>
+              {(() => {
+                const booked = coverByDate.get(selected) ?? [];
+                const openSlots = availableSlotsOn(selected, occupancy);
+                return (
+                  <div className="rounded-lg border border-sky-border bg-sky-bg/60 p-3">
+                    <span className="text-sm font-bold text-navy-700">
+                      Whole Resort
+                    </span>
 
-                      {booked.length > 0 && (
-                        <ul className="mt-2 flex flex-col gap-1.5">
-                          {booked.map((b, i) => (
-                            <li
-                              key={i}
-                              className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 text-xs"
-                            >
-                              <span className="font-semibold text-navy-700">
-                                {SLOT_LABELS[b.slot]}
-                                <span className="ml-1 font-normal text-navy-400">
-                                  {blockTime(b)}
-                                </span>
+                    {booked.length > 0 && (
+                      <ul className="mt-2 flex flex-col gap-1.5">
+                        {booked.map((b, i) => (
+                          <li
+                            key={i}
+                            className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 text-xs"
+                          >
+                            <span className="font-semibold text-navy-700">
+                              {SLOT_LABELS[b.slot]}
+                              <span className="ml-1 font-normal text-navy-400">
+                                {blockTime(b)}
                               </span>
-                              <span
-                                className={[
-                                  "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                                  b.status === "CONFIRMED"
-                                    ? "bg-navy-100 text-navy-600"
-                                    : "bg-amber-100 text-amber-700",
-                                ].join(" ")}
-                              >
-                                {b.status === "CONFIRMED" ? "Booked" : "On hold"}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-
-                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        {openSlots.length > 0 ? (
-                          openSlots.map((s) => (
-                            <span
-                              key={s}
-                              className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
-                            >
-                              {SLOT_LABELS[s]} open
                             </span>
-                          ))
-                        ) : (
-                          <span className="text-xs text-navy-400">
-                            Fully booked.
-                          </span>
-                        )}
-                      </div>
+                            <span
+                              className={[
+                                "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+                                b.status === "CONFIRMED"
+                                  ? "bg-navy-100 text-navy-600"
+                                  : "bg-amber-100 text-amber-700",
+                              ].join(" ")}
+                            >
+                              {b.status === "CONFIRMED" ? "Booked" : "On hold"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
 
-                      {!isPast && openSlots.length > 0 && (
-                        <button
-                          onClick={() => setFormOpen({ resource })}
-                          className="mt-3 w-full rounded-lg bg-navy-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-navy-800"
-                        >
-                          Request {RESOURCE_LABELS[resource]}
-                        </button>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {openSlots.length > 0 ? (
+                        openSlots.map((s) => (
+                          <span
+                            key={s}
+                            className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700"
+                          >
+                            {SLOT_LABELS[s]} open
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-navy-400">
+                          Fully booked.
+                        </span>
                       )}
                     </div>
-                  );
-                })}
-              </div>
+
+                    {!isPast && openSlots.length > 0 && (
+                      <button
+                        onClick={() => setFormOpen(true)}
+                        className="mt-3 w-full rounded-lg bg-navy-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-navy-800"
+                      >
+                        Request the Resort
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </section>
         </div>
@@ -630,7 +591,7 @@ export function PublicBooking({
         <div
           className="fixed inset-0 z-40 flex items-center justify-center bg-navy-900/40 p-4 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setFormOpen(null);
+            if (e.target === e.currentTarget) setFormOpen(false);
           }}
         >
           <div className="w-full max-w-md rounded-card border border-sky-border bg-white p-5 shadow-2xl">
@@ -639,7 +600,7 @@ export function PublicBooking({
                 Request a booking
               </h3>
               <button
-                onClick={() => setFormOpen(null)}
+                onClick={() => setFormOpen(false)}
                 className="text-navy-400 hover:text-navy-700"
                 aria-label="Close"
               >
@@ -648,10 +609,9 @@ export function PublicBooking({
             </div>
             <RequestForm
               initialDate={selected}
-              occByResource={occByResource}
-              defaultResource={formOpen.resource}
+              occupancy={occupancy}
               onDone={() => {
-                setFormOpen(null);
+                setFormOpen(false);
                 router.refresh();
               }}
             />

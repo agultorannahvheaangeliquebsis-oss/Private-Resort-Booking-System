@@ -1,11 +1,8 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
-import type { ResourceType } from "@prisma/client";
 import { createBooking, type BookingActionState } from "@/app/actions/bookings";
 import {
-  RESOURCE_LABELS,
-  RESOURCE_TYPES,
   SLOT_LABELS,
   availableSlotsOn,
   slotWindowLabel,
@@ -18,18 +15,15 @@ const inputClass =
 
 export function BookingForm({
   date,
-  occByResource,
-  defaultResource,
+  occupancy,
   onSuccess,
   onCancel,
 }: {
   date: string;
-  occByResource: Map<ResourceType, Occupancy[]>;
-  defaultResource: ResourceType;
+  occupancy: Occupancy[];
   onSuccess: () => void;
   onCancel: () => void;
 }) {
-  const [resource, setResource] = useState<ResourceType>(defaultResource);
   const [checkIn, setCheckIn] = useState(date);
   const [checkOut, setCheckOut] = useState(date);
   const [state, formAction, pending] = useActionState<
@@ -42,10 +36,10 @@ export function BookingForm({
 
   // Slots still open on the check-in date (single-day hint). Multi-day stays
   // are always overnight, so the picker is hidden then.
-  const openSlots = useMemo(() => {
-    const occ = occByResource.get(resource) ?? [];
-    return availableSlotsOn(checkIn, occ);
-  }, [occByResource, resource, checkIn]);
+  const openSlots = useMemo(
+    () => availableSlotsOn(checkIn, occupancy),
+    [occupancy, checkIn]
+  );
 
   useEffect(() => {
     if (state?.ok) onSuccess();
@@ -94,50 +88,47 @@ export function BookingForm({
         </p>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      {!isMultiDay && (
         <label className="flex flex-col gap-1.5">
-          <span className="text-xs font-semibold text-navy-700">What</span>
+          <span className="text-xs font-semibold text-navy-700">
+            Booking type
+          </span>
           <select
-            name="resource"
-            value={resource}
-            onChange={(e) => setResource(e.target.value as ResourceType)}
+            name="slot"
             className={inputClass}
+            disabled={noSlots}
+            required
           >
-            {RESOURCE_TYPES.map((r) => (
-              <option key={r} value={r}>
-                {RESOURCE_LABELS[r]}
+            {openSlots.map((s) => (
+              <option key={s} value={s}>
+                {SLOT_LABELS[s]}
               </option>
             ))}
           </select>
         </label>
-
-        {!isMultiDay && (
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-semibold text-navy-700">
-              Booking type
-            </span>
-            <select
-              name="slot"
-              className={inputClass}
-              disabled={noSlots}
-              required
-            >
-              {openSlots.map((s) => (
-                <option key={s} value={s}>
-                  {SLOT_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-      </div>
+      )}
 
       {noSlots ? (
         <p className="rounded-lg bg-navy-100 px-3 py-2 text-sm font-medium text-navy-700">
-          {RESOURCE_LABELS[resource]} is fully booked on this date.
+          The resort is fully booked on this date.
         </p>
       ) : (
         <>
+          <label className="flex items-start gap-2 rounded-lg border border-sky-border bg-sky-panel/40 px-3 py-2.5">
+            <input
+              type="checkbox"
+              name="functionHallAircon"
+              className="mt-0.5 h-4 w-4 rounded border-sky-border text-navy-700 focus:ring-navy-300"
+            />
+            <span className="text-xs text-navy-700">
+              <span className="font-semibold">
+                Function hall with air-conditioning
+              </span>
+              <br />
+              <span className="text-navy-500">Additional charges apply.</span>
+            </span>
+          </label>
+
           {/* Owner may set the exact times now (optional). */}
           <fieldset className="rounded-lg border border-sky-border p-3">
             <legend className="px-1 text-xs font-semibold text-navy-600">

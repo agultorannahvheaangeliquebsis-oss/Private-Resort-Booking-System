@@ -38,7 +38,6 @@ export default async function BookPage({
     },
     // Public data only — no guest names, contacts, or notes leave the server.
     select: {
-      resource: true,
       slot: true,
       status: true,
       date: true,
@@ -50,7 +49,6 @@ export default async function BookPage({
   });
 
   const bookings: PublicBookingLite[] = rows.map((r) => ({
-    resource: r.resource,
     slot: r.slot,
     status: r.status,
     date: toDateKey(r.date),

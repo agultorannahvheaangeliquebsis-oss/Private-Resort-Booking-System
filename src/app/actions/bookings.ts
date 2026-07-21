@@ -1,19 +1,12 @@
 "use server";
 
 import { Prisma } from "@prisma/client";
-import type {
-  BookingSlot,
-  BookingStatus,
-  PrismaClient,
-  ResourceType,
-} from "@prisma/client";
+import type { BookingSlot, BookingStatus, PrismaClient } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   BOOKING_SLOTS,
-  RESOURCE_LABELS,
-  RESOURCE_TYPES,
   SLOT_LABELS,
   bookingsConflict,
   type Occupancy,
@@ -59,19 +52,17 @@ type TxClient = Omit<
 >;
 
 /**
- * Throw ConflictError if `candidate` overlaps any active booking on the same
- * resource. Only bookings whose date range could touch the candidate's range
- * are fetched; the precise decision uses interval overlap (owner times aware).
+ * Throw ConflictError if `candidate` overlaps any other active booking.
+ * Only bookings whose date range could touch the candidate's range are
+ * fetched; the precise decision uses interval overlap (owner times aware).
  */
 async function assertNoConflict(
   tx: TxClient,
-  resource: ResourceType,
   candidate: Occupancy,
   excludeId?: string
 ): Promise<void> {
   const rows = await tx.booking.findMany({
     where: {
-      resource,
       status: { not: "CANCELLED" },
       ...(excludeId ? { id: { not: excludeId } } : {}),
       // Range overlap: existing.date <= candidate.endDate AND
@@ -98,24 +89,20 @@ async function assertNoConflict(
         ? formatShortDate(toDateKey(clash.date))
         : `${formatShortDate(toDateKey(clash.date))}–${formatShortDate(toDateKey(clash.endDate))}`;
     throw new ConflictError(
-      `${RESOURCE_LABELS[resource]} is already booked (${SLOT_LABELS[clash.slot]}, ${when}).`
+      `The resort is already booked (${SLOT_LABELS[clash.slot]}, ${when}).`
     );
   }
 }
 
 /** Shared parsing/validation for the date range + slot fields. */
 function parseRange(formData: FormData):
-  | { ok: true; resource: ResourceType; slot: BookingSlot; date: string; endDate: string }
+  | { ok: true; slot: BookingSlot; date: string; endDate: string }
   | { ok: false; error: string } {
-  const resource = String(formData.get("resource") ?? "") as ResourceType;
   let slot = String(formData.get("slot") ?? "") as BookingSlot;
   const date = String(formData.get("date") ?? "");
   const endDateRaw = String(formData.get("endDate") ?? "").trim();
   const endDate = endDateRaw || date;
 
-  if (!RESOURCE_TYPES.includes(resource)) {
-    return { ok: false, error: "Please choose what to book." };
-  }
   if (!isValidDateKey(date) || !isValidDateKey(endDate)) {
     return { ok: false, error: "Please choose valid dates." };
   }
@@ -130,11 +117,10 @@ function parseRange(formData: FormData):
   if (!BOOKING_SLOTS.includes(slot)) {
     return { ok: false, error: "Please choose a booking type." };
   }
-  return { ok: true, resource, slot, date, endDate };
+  return { ok: true, slot, date, endDate };
 }
 
 async function notifyNewBooking(opts: {
-  resource: ResourceType;
   slot: BookingSlot;
   date: string;
   endDate: string;
@@ -156,9 +142,7 @@ async function notifyNewBooking(opts: {
     .filter(Boolean)
     .join(" · ");
   await notifyAdmins({
-    title: opts.isRequest
-      ? `📩 New request — ${RESOURCE_LABELS[opts.resource]}`
-      : `🏝️ New booking — ${RESOURCE_LABELS[opts.resource]}`,
+    title: opts.isRequest ? "📩 New request" : "🏝️ New booking",
     body: details,
     url: "/dashboard",
     tag: opts.isRequest ? "new-request" : "new-booking",
@@ -176,7 +160,7 @@ export async function createBooking(
 
   const parsed = parseRange(formData);
   if (!parsed.ok) return parsed;
-  const { resource, slot, date, endDate } = parsed;
+  const { slot, date, endDate } = parsed;
 
   const statusRaw = String(formData.get("status") ?? "CONFIRMED");
   const status: BookingStatus = statusRaw === "PENDING" ? "PENDING" : "CONFIRMED";
@@ -185,6 +169,7 @@ export async function createBooking(
   const guestEmail = optionalString(formData.get("guestEmail"));
   const notes = optionalString(formData.get("notes"));
   const paxRaw = optionalString(formData.get("pax"));
+  const functionHallAircon = formData.get("functionHallAircon") === "on";
 
   let startTime: string | null;
   let endTime: string | null;
@@ -209,7 +194,7 @@ export async function createBooking(
   try {
     await prisma.$transaction(
       async (tx) => {
-        await assertNoConflict(tx, resource, {
+        await assertNoConflict(tx, {
           date,
           endDate,
           slot,
@@ -218,7 +203,6 @@ export async function createBooking(
         });
         await tx.booking.create({
           data: {
-            resource,
             slot,
             status,
             source: "STAFF",
@@ -226,6 +210,7 @@ export async function createBooking(
             endDate: dateKeyToUTC(endDate),
             startTime,
             endTime,
+            functionHallAircon,
             guestName,
             guestPhone,
             guestEmail,
@@ -252,7 +237,6 @@ export async function createBooking(
   }
 
   await notifyNewBooking({
-    resource,
     slot,
     date,
     endDate,
@@ -275,13 +259,14 @@ export async function createRequest(
 ): Promise<BookingActionState> {
   const parsed = parseRange(formData);
   if (!parsed.ok) return parsed;
-  const { resource, slot, date, endDate } = parsed;
+  const { slot, date, endDate } = parsed;
 
   const guestName = String(formData.get("guestName") ?? "").trim();
   const guestPhone = optionalString(formData.get("guestPhone"));
   const guestEmail = optionalString(formData.get("guestEmail"));
   const notes = optionalString(formData.get("notes"));
   const paxRaw = optionalString(formData.get("pax"));
+  const functionHallAircon = formData.get("functionHallAircon") === "on";
 
   if (!guestName) return { ok: false, error: "Please enter your name." };
   if (!guestPhone) {
@@ -300,15 +285,15 @@ export async function createRequest(
       async (tx) => {
         // Guest requests carry no exact times yet — the slot's default window
         // decides whether the date is still open to request.
-        await assertNoConflict(tx, resource, { date, endDate, slot });
+        await assertNoConflict(tx, { date, endDate, slot });
         await tx.booking.create({
           data: {
-            resource,
             slot,
             status: "PENDING",
             source: "GUEST",
             date: dateKeyToUTC(date),
             endDate: dateKeyToUTC(endDate),
+            functionHallAircon,
             guestName,
             guestPhone,
             guestEmail,
@@ -334,7 +319,6 @@ export async function createRequest(
   }
 
   await notifyNewBooking({
-    resource,
     slot,
     date,
     endDate,
@@ -380,7 +364,6 @@ export async function confirmBooking(
         // Re-check with the (possibly new) exact times against everyone else.
         await assertNoConflict(
           tx,
-          booking.resource,
           {
             date: toDateKey(booking.date),
             endDate: toDateKey(booking.endDate),

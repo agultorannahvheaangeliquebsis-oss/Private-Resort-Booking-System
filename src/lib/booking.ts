@@ -1,12 +1,7 @@
-import type { BookingSlot, ResourceType } from "@prisma/client";
+import type { BookingSlot } from "@prisma/client";
 import { dayIndex, formatTime, type DateKey } from "./dates";
 
 // --- Display labels -------------------------------------------------------
-
-export const RESOURCE_LABELS: Record<ResourceType, string> = {
-  RESORT: "Whole Resort",
-  FUNCTION_HALL: "Function Hall",
-};
 
 export const SLOT_LABELS: Record<BookingSlot, string> = {
   DAY: "Day Tour",
@@ -14,7 +9,6 @@ export const SLOT_LABELS: Record<BookingSlot, string> = {
   OVERNIGHT: "Overnight",
 };
 
-export const RESOURCE_TYPES: ResourceType[] = ["RESORT", "FUNCTION_HALL"];
 export const BOOKING_SLOTS: BookingSlot[] = ["DAY", "NIGHT", "OVERNIGHT"];
 
 // --- Slot time windows ----------------------------------------------------
@@ -88,7 +82,7 @@ function intervalsOverlap(a: [number, number], b: [number, number]): boolean {
   return a[0] < b[1] && b[0] < a[1];
 }
 
-/** Do two bookings occupy overlapping time? (Caller filters by resource.) */
+/** Do two bookings occupy overlapping time? */
 export function bookingsConflict(a: Occupancy, b: Occupancy): boolean {
   return intervalsOverlap(occupancyInterval(a), occupancyInterval(b));
 }
@@ -107,9 +101,9 @@ function candidate(date: DateKey, slot: BookingSlot): Occupancy {
 }
 
 /**
- * Which slots a guest could still request on `date` for one resource, given
- * the bookings already on that resource. `existing` may include multi-day
- * stays; their intervals are honored automatically.
+ * Which slots a guest could still request on `date`, given the bookings
+ * already on the calendar. `existing` may include multi-day stays; their
+ * intervals are honored automatically.
  */
 export function availableSlotsOn(
   date: DateKey,

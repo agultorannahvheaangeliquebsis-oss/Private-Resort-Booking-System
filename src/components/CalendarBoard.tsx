@@ -2,16 +2,9 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type {
-  BookingSlot,
-  BookingSource,
-  BookingStatus,
-  ResourceType,
-} from "@prisma/client";
+import type { BookingSlot, BookingSource, BookingStatus } from "@prisma/client";
 import { cancelBooking } from "@/app/actions/bookings";
 import {
-  RESOURCE_LABELS,
-  RESOURCE_TYPES,
   SLOT_LABELS,
   availabilityOn,
   availableSlotsOn,
@@ -31,7 +24,6 @@ import { BookingForm } from "./BookingForm";
 
 export type BookingLite = {
   id: string;
-  resource: ResourceType;
   slot: BookingSlot;
   status: BookingStatus;
   source: BookingSource;
@@ -39,6 +31,7 @@ export type BookingLite = {
   endDate: string;
   startTime: string | null;
   endTime: string | null;
+  functionHallAircon: boolean;
   guestName: string;
   guestPhone: string | null;
   guestEmail: string | null;
@@ -98,7 +91,7 @@ export function CalendarBoard({
   const defaultSelected = todayInMonth ? today : firstInMonth;
 
   const [selected, setSelected] = useState(defaultSelected);
-  const [modal, setModal] = useState<null | { resource: ResourceType }>(null);
+  const [modal, setModal] = useState(false);
 
   // Reset the selected day when the visible month changes. Adjusting state
   // during render (not in an effect) is React's recommended pattern here.
@@ -109,17 +102,7 @@ export function CalendarBoard({
     setSelected(defaultSelected);
   }
 
-  // Occupancy lists per resource, for availability math.
-  const occByResource = useMemo(() => {
-    const map = new Map<ResourceType, Occupancy[]>();
-    for (const r of RESOURCE_TYPES) {
-      map.set(
-        r,
-        bookings.filter((b) => b.resource === r).map(asOccupancy)
-      );
-    }
-    return map;
-  }, [bookings]);
+  const occupancy = useMemo(() => bookings.map(asOccupancy), [bookings]);
 
   // Bookings covering each date (multi-day stays appear on every day).
   const coverByDate = useMemo(() => {
@@ -159,7 +142,7 @@ export function CalendarBoard({
     router.refresh();
   }
   function closeModalAndRefresh() {
-    setModal(null);
+    setModal(false);
     router.refresh();
   }
 
@@ -228,10 +211,7 @@ export function CalendarBoard({
 
             {cells.map((cell) => {
               const dayBookings = coverByDate.get(cell.key) ?? [];
-              const resortAvail = availabilityOn(
-                cell.key,
-                occByResource.get("RESORT") ?? []
-              );
+              const resortAvail = availabilityOn(cell.key, occupancy);
 
               const isSelected = cell.key === selected;
               const isToday = cell.key === today;
@@ -268,7 +248,6 @@ export function CalendarBoard({
                   </span>
                   <span className="flex flex-col gap-0.5">
                     {dayBookings.map((b) => {
-                      const isHall = b.resource === "FUNCTION_HALL";
                       const multi = b.date !== b.endDate;
                       const cont =
                         multi && b.date !== cell.key ? "‹ " : "";
@@ -278,16 +257,13 @@ export function CalendarBoard({
                         <span
                           key={b.id}
                           className={[
-                            "truncate rounded px-1 text-[10px] font-semibold leading-tight",
-                            isHall
-                              ? "bg-sunset-400 text-navy-900"
-                              : "bg-navy-600 text-white",
+                            "truncate rounded bg-navy-600 px-1 text-[10px] font-semibold leading-tight text-white",
                             b.status === "PENDING" ? "opacity-60" : "",
                           ].join(" ")}
                         >
                           {cont}
-                          {isHall ? "Hall · " : ""}
                           {SLOT_SHORT[b.slot]}
+                          {b.functionHallAircon ? " ❄" : ""}
                           {tail}
                         </span>
                       );
@@ -312,111 +288,101 @@ export function CalendarBoard({
               : `${selectedBookings.length} reservation${selectedBookings.length > 1 ? "s" : ""}`}
           </p>
 
-          <div className="flex flex-col gap-4">
-            {RESOURCE_TYPES.map((resource) => {
-              const list = selectedBookings.filter(
-                (b) => b.resource === resource
-              );
-              const openSlots = availableSlotsOn(
-                selected,
-                occByResource.get(resource) ?? []
-              );
-              return (
-                <div
-                  key={resource}
-                  className="rounded-lg border border-sky-border bg-sky-bg/60 p-3"
-                >
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-sm font-bold text-navy-700">
-                      {RESOURCE_LABELS[resource]}
-                    </span>
-                    <button
-                      onClick={() => setModal({ resource })}
-                      disabled={openSlots.length === 0}
-                      className="rounded-lg bg-navy-700 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      + Add
-                    </button>
-                  </div>
-
-                  {list.length === 0 ? (
-                    <p className="text-xs text-navy-400">Available.</p>
-                  ) : (
-                    <ul className="flex flex-col gap-2">
-                      {list.map((b) => {
-                        const times = timeRange(b);
-                        return (
-                          <li
-                            key={b.id}
-                            className="rounded-lg border border-sky-border bg-white p-2.5"
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-navy-800">
-                                  {b.guestName}
-                                  {b.source === "GUEST" && (
-                                    <span className="ml-1.5 rounded bg-sky-panel px-1 text-[9px] font-bold uppercase text-navy-500">
-                                      Guest
-                                    </span>
-                                  )}
-                                </p>
-                                <p className="text-xs text-navy-500">
-                                  {SLOT_LABELS[b.slot]}
-                                  {b.pax ? ` · ${b.pax} pax` : ""}
-                                </p>
-                                <p className="text-xs text-navy-400">
-                                  {dateRange(b)}
-                                </p>
-                                <p className="text-xs font-medium text-navy-500">
-                                  {times ?? "Time to be set"}
-                                </p>
-                                {b.guestPhone && (
-                                  <p className="text-xs text-navy-400">
-                                    {b.guestPhone}
-                                  </p>
-                                )}
-                                {b.notes && (
-                                  <p className="mt-1 text-xs italic text-navy-400">
-                                    {b.notes}
-                                  </p>
-                                )}
-                              </div>
-                              <StatusBadge status={b.status} />
-                            </div>
-
-                            {b.status === "PENDING" ? (
-                              <ConfirmControl booking={b} onDone={refresh} />
-                            ) : (
-                              <form
-                                action={cancelBooking}
-                                className="mt-2 text-right"
-                              >
-                                <input type="hidden" name="id" value={b.id} />
-                                <button
-                                  type="submit"
-                                  onClick={(e) => {
-                                    if (
-                                      !window.confirm(
-                                        `Cancel ${b.guestName}'s reservation?`
-                                      )
-                                    )
-                                      e.preventDefault();
-                                  }}
-                                  className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
-                                >
-                                  Cancel reservation
-                                </button>
-                              </form>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
+          {(() => {
+            const openSlots = availableSlotsOn(selected, occupancy);
+            return (
+              <div className="rounded-lg border border-sky-border bg-sky-bg/60 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm font-bold text-navy-700">
+                    Whole Resort
+                  </span>
+                  <button
+                    onClick={() => setModal(true)}
+                    disabled={openSlots.length === 0}
+                    className="rounded-lg bg-navy-700 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    + Add
+                  </button>
                 </div>
-              );
-            })}
-          </div>
+
+                {selectedBookings.length === 0 ? (
+                  <p className="text-xs text-navy-400">Available.</p>
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {selectedBookings.map((b) => {
+                      const times = timeRange(b);
+                      return (
+                        <li
+                          key={b.id}
+                          className="rounded-lg border border-sky-border bg-white p-2.5"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-navy-800">
+                                {b.guestName}
+                                {b.source === "GUEST" && (
+                                  <span className="ml-1.5 rounded bg-sky-panel px-1 text-[9px] font-bold uppercase text-navy-500">
+                                    Guest
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-xs text-navy-500">
+                                {SLOT_LABELS[b.slot]}
+                                {b.pax ? ` · ${b.pax} pax` : ""}
+                                {b.functionHallAircon ? " · Hall + aircon" : ""}
+                              </p>
+                              <p className="text-xs text-navy-400">
+                                {dateRange(b)}
+                              </p>
+                              <p className="text-xs font-medium text-navy-500">
+                                {times ?? "Time to be set"}
+                              </p>
+                              {b.guestPhone && (
+                                <p className="text-xs text-navy-400">
+                                  {b.guestPhone}
+                                </p>
+                              )}
+                              {b.notes && (
+                                <p className="mt-1 text-xs italic text-navy-400">
+                                  {b.notes}
+                                </p>
+                              )}
+                            </div>
+                            <StatusBadge status={b.status} />
+                          </div>
+
+                          {b.status === "PENDING" ? (
+                            <ConfirmControl booking={b} onDone={refresh} />
+                          ) : (
+                            <form
+                              action={cancelBooking}
+                              className="mt-2 text-right"
+                            >
+                              <input type="hidden" name="id" value={b.id} />
+                              <button
+                                type="submit"
+                                onClick={(e) => {
+                                  if (
+                                    !window.confirm(
+                                      `Cancel ${b.guestName}'s reservation?`
+                                    )
+                                  )
+                                    e.preventDefault();
+                                }}
+                                className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
+                              >
+                                Cancel reservation
+                              </button>
+                            </form>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })()}
         </div>
       </section>
 
@@ -425,7 +391,7 @@ export function CalendarBoard({
         <div
           className="fixed inset-0 z-40 flex items-center justify-center bg-navy-900/40 p-4 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setModal(null);
+            if (e.target === e.currentTarget) setModal(false);
           }}
         >
           <div className="w-full max-w-md rounded-card border border-sky-border bg-white p-5 shadow-2xl">
@@ -434,7 +400,7 @@ export function CalendarBoard({
                 New reservation
               </h3>
               <button
-                onClick={() => setModal(null)}
+                onClick={() => setModal(false)}
                 className="text-navy-400 hover:text-navy-700"
                 aria-label="Close"
               >
@@ -443,10 +409,9 @@ export function CalendarBoard({
             </div>
             <BookingForm
               date={selected}
-              occByResource={occByResource}
-              defaultResource={modal.resource}
+              occupancy={occupancy}
               onSuccess={closeModalAndRefresh}
-              onCancel={() => setModal(null)}
+              onCancel={() => setModal(false)}
             />
           </div>
         </div>

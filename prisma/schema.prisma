@@ -12,13 +12,6 @@ enum Role {
   ADMIN
 }
 
-// The two independently bookable resources. The whole resort is rented
-// exclusively per date/slot; the function hall can be booked on its own.
-enum ResourceType {
-  RESORT
-  FUNCTION_HALL
-}
-
 // The guest's coarse choice. Each slot maps to a default time window;
 // once the owner confirms and enters exact times, availability is decided
 // by the real interval overlap. See src/lib/booking.ts for the rule.
@@ -71,8 +64,7 @@ model PushSubscription {
 }
 
 model Booking {
-  id       String        @id @default(cuid())
-  resource ResourceType  @default(RESORT)
+  id String @id @default(cuid())
   // Check-in and check-out dates. For a single-day booking endDate == date.
   // A multi-day stay spans every date from `date` through `endDate`.
   date     DateTime      @db.Date
@@ -88,6 +80,10 @@ model Booking {
   startTime String?
   endTime   String?
 
+  // Whole-resort bookings may add the function hall with air-conditioning.
+  // This carries an additional charge (kept external, not stored).
+  functionHallAircon Boolean @default(false)
+
   // Guest details. Rates are kept external and intentionally not stored.
   guestName  String
   guestPhone String?
@@ -100,6 +96,6 @@ model Booking {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@index([resource, date])
-  @@index([resource, endDate])
+  @@index([date])
+  @@index([endDate])
 }
