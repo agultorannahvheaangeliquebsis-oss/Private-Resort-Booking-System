@@ -19,12 +19,12 @@ enum ResourceType {
   FUNCTION_HALL
 }
 
-// A booking occupies one or more "periods" of a date:
-//   DAY       -> { day }
-//   NIGHT     -> { night }
-//   OVERNIGHT -> { day, night }  (blocks the whole date)
-// Two bookings on the same resource + date conflict only if their
-// period sets intersect. See src/lib/booking.ts for the rule.
+// The guest's coarse choice. Each slot maps to a default time window;
+// once the owner confirms and enters exact times, availability is decided
+// by the real interval overlap. See src/lib/booking.ts for the rule.
+//   DAY       -> daytime
+//   NIGHT     -> evening into the next morning
+//   OVERNIGHT -> afternoon check-in to next-day checkout
 enum BookingSlot {
   DAY
   NIGHT
@@ -35,6 +35,13 @@ enum BookingStatus {
   PENDING
   CONFIRMED
   CANCELLED
+}
+
+// Where a booking originated: entered by staff on the dashboard, or
+// submitted by a guest through the public request form.
+enum BookingSource {
+  STAFF
+  GUEST
 }
 
 model User {
@@ -66,12 +73,22 @@ model PushSubscription {
 model Booking {
   id       String        @id @default(cuid())
   resource ResourceType  @default(RESORT)
+  // Check-in and check-out dates. For a single-day booking endDate == date.
+  // A multi-day stay spans every date from `date` through `endDate`.
   date     DateTime      @db.Date
+  endDate  DateTime      @db.Date
   slot     BookingSlot
   status   BookingStatus @default(CONFIRMED)
+  source   BookingSource @default(STAFF)
 
-  // Guest details captured by staff at reservation time. Rates are kept
-  // external and are intentionally not stored or displayed here.
+  // Exact times ("HH:MM", 24h) the owner enters, usually when confirming a
+  // request. Blank until then; availability falls back to the slot's default
+  // window while empty. These drive case-by-case availability (e.g. a 2 PM
+  // checkout leaves that night bookable).
+  startTime String?
+  endTime   String?
+
+  // Guest details. Rates are kept external and intentionally not stored.
   guestName  String
   guestPhone String?
   guestEmail String?
@@ -84,4 +101,5 @@ model Booking {
   updatedAt   DateTime @updatedAt
 
   @@index([resource, date])
+  @@index([resource, endDate])
 }

@@ -89,17 +89,36 @@ export function PushToggle() {
         onClick={subscribed ? disable : enable}
         disabled={busy}
         aria-pressed={subscribed}
+        aria-label={
+          subscribed ? "Booking alerts are on" : "Enable booking alerts"
+        }
         title={subscribed ? "Booking alerts are on" : "Get notified of new bookings"}
-        className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-60 ${
+        className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border transition disabled:opacity-60 ${
           subscribed
             ? "border-sky-border bg-sky-panel text-navy-700 hover:bg-white"
             : "border-navy-700 bg-navy-700 text-white hover:bg-navy-800"
         }`}
       >
-        {busy ? "…" : subscribed ? "🔔 Alerts on" : "🔔 Enable alerts"}
+        {busy ? (
+          <span className="text-sm">…</span>
+        ) : (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-5 w-5"
+            aria-hidden
+          >
+            <path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 01-3.46 0" />
+          </svg>
+        )}
       </button>
       {error && (
-        <p className="absolute right-0 top-full mt-1 w-56 rounded-md border border-sky-border bg-white p-2 text-xs text-sunset-500 shadow">
+        <p className="absolute right-0 top-full z-10 mt-1 w-56 rounded-md border border-sky-border bg-white p-2 text-xs text-sunset-500 shadow">
           {error}
         </p>
       )}

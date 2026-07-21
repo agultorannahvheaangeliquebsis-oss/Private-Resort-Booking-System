@@ -78,3 +78,52 @@ export function formatLongDate(key: DateKey): string {
     timeZone: "UTC",
   }).format(dateKeyToUTC(key));
 }
+
+/** Compact date, e.g. "Jul 20". */
+export function formatShortDate(key: DateKey): string {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(dateKeyToUTC(key));
+}
+
+/** Whole days since the Unix epoch for a date key — a stable day counter. */
+export function dayIndex(key: DateKey): number {
+  return Math.round(dateKeyToUTC(key).getTime() / 86_400_000);
+}
+
+/** Shift a date key by `days` (may be negative), returning a new key. */
+export function addDaysKey(key: DateKey, days: number): DateKey {
+  const d = dateKeyToUTC(key);
+  d.setUTCDate(d.getUTCDate() + days);
+  return toDateKey(d);
+}
+
+/** Inclusive list of date keys from `start` through `end`. */
+export function datesInRange(start: DateKey, end: DateKey): DateKey[] {
+  const out: DateKey[] = [];
+  for (let k = start; k <= end; k = addDaysKey(k, 1)) {
+    out.push(k);
+    if (out.length > 366) break; // safety valve against bad input
+  }
+  return out;
+}
+
+/** Nights between check-in and check-out keys (0 for a single-day booking). */
+export function nightsBetween(start: DateKey, end: DateKey): number {
+  return Math.max(0, dayIndex(end) - dayIndex(start));
+}
+
+/** Format an "HH:MM" (24h) time as e.g. "2:00 PM". Returns null if unparseable. */
+export function formatTime(hhmm: string | null | undefined): string | null {
+  if (!hhmm) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  const period = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(min).padStart(2, "0")} ${period}`;
+}

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type {
   BookingSlot,
+  BookingSource,
   BookingStatus,
   ResourceType,
 } from "@prisma/client";
@@ -12,11 +13,18 @@ import {
   RESOURCE_LABELS,
   RESOURCE_TYPES,
   SLOT_LABELS,
-  availabilityFor,
+  availabilityOn,
+  availableSlotsOn,
+  coversDate,
+  type Occupancy,
 } from "@/lib/booking";
+import { ConfirmControl, StatusBadge } from "./ConfirmControl";
 import {
   formatLongDate,
+  formatShortDate,
+  formatTime,
   monthLabel,
+  nightsBetween,
   type MonthCell,
 } from "@/lib/dates";
 import { BookingForm } from "./BookingForm";
@@ -26,7 +34,11 @@ export type BookingLite = {
   resource: ResourceType;
   slot: BookingSlot;
   status: BookingStatus;
+  source: BookingSource;
   date: string;
+  endDate: string;
+  startTime: string | null;
+  endTime: string | null;
   guestName: string;
   guestPhone: string | null;
   guestEmail: string | null;
@@ -42,24 +54,28 @@ const SLOT_SHORT: Record<BookingSlot, string> = {
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-function StatusBadge({ status }: { status: BookingStatus }) {
-  const styles: Record<BookingStatus, string> = {
-    CONFIRMED: "bg-emerald-100 text-emerald-800",
-    PENDING: "bg-amber-100 text-amber-800",
-    CANCELLED: "bg-gray-100 text-gray-500",
-  };
-  const labels: Record<BookingStatus, string> = {
-    CONFIRMED: "Confirmed",
-    PENDING: "Pending",
-    CANCELLED: "Cancelled",
-  };
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${styles[status]}`}
-    >
-      {labels[status]}
-    </span>
-  );
+const asOccupancy = (b: BookingLite): Occupancy => ({
+  date: b.date,
+  endDate: b.endDate,
+  slot: b.slot,
+  startTime: b.startTime,
+  endTime: b.endTime,
+});
+
+/** "2 PM – 12 NN" style range, or a fallback when no exact times are set. */
+function timeRange(b: BookingLite): string | null {
+  const start = formatTime(b.startTime);
+  const end = formatTime(b.endTime);
+  if (start && end) return `${start} – ${end}`;
+  if (start) return `from ${start}`;
+  if (end) return `until ${end}`;
+  return null;
+}
+
+function dateRange(b: BookingLite): string {
+  if (b.date === b.endDate) return formatLongDate(b.date);
+  const nights = nightsBetween(b.date, b.endDate);
+  return `${formatShortDate(b.date)} → ${formatShortDate(b.endDate)} · ${nights} night${nights > 1 ? "s" : ""}`;
 }
 
 export function CalendarBoard({
@@ -84,30 +100,64 @@ export function CalendarBoard({
   const [selected, setSelected] = useState(defaultSelected);
   const [modal, setModal] = useState<null | { resource: ResourceType }>(null);
 
-  // Reset selection when the visible month changes.
-  useEffect(() => {
+  // Reset the selected day when the visible month changes. Adjusting state
+  // during render (not in an effect) is React's recommended pattern here.
+  const ymKey = `${year}-${month0}`;
+  const [prevYmKey, setPrevYmKey] = useState(ymKey);
+  if (ymKey !== prevYmKey) {
+    setPrevYmKey(ymKey);
     setSelected(defaultSelected);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [year, month0]);
+  }
 
-  const byDate = useMemo(() => {
-    const map = new Map<string, BookingLite[]>();
-    for (const b of bookings) {
-      const list = map.get(b.date);
-      if (list) list.push(b);
-      else map.set(b.date, [b]);
+  // Occupancy lists per resource, for availability math.
+  const occByResource = useMemo(() => {
+    const map = new Map<ResourceType, Occupancy[]>();
+    for (const r of RESOURCE_TYPES) {
+      map.set(
+        r,
+        bookings.filter((b) => b.resource === r).map(asOccupancy)
+      );
     }
     return map;
   }, [bookings]);
 
-  const selectedBookings = byDate.get(selected) ?? [];
+  // Bookings covering each date (multi-day stays appear on every day).
+  const coverByDate = useMemo(() => {
+    const map = new Map<string, BookingLite[]>();
+    for (const cell of cells) {
+      const list = bookings.filter((b) => coversDate(b, cell.key));
+      if (list.length) map.set(cell.key, list);
+    }
+    return map;
+  }, [bookings, cells]);
+
+  const selectedBookings = coverByDate.get(selected) ?? [];
 
   function goMonth(delta: number) {
     const d = new Date(Date.UTC(year, month0 + delta, 1));
     const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    router.push(`/dashboard?ym=${key}`);
+    router.push(`/dashboard/calendar?ym=${key}`);
   }
 
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  function onTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  }
+  function onTouchEnd(e: React.TouchEvent) {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy)) return;
+    goMonth(dx < 0 ? 1 : -1);
+  }
+
+  function refresh() {
+    router.refresh();
+  }
   function closeModalAndRefresh() {
     setModal(null);
     router.refresh();
@@ -131,7 +181,7 @@ export function CalendarBoard({
                 ‹
               </button>
               <button
-                onClick={() => router.push("/dashboard")}
+                onClick={() => router.push("/dashboard/calendar")}
                 className="rounded-lg border border-sky-border bg-white px-3 py-1.5 text-sm font-semibold text-navy-700 transition hover:bg-sky-panel"
               >
                 Today
@@ -160,17 +210,13 @@ export function CalendarBoard({
               <span className="h-3 w-3 rounded bg-navy-100 ring-1 ring-navy-300" />
               Fully booked
             </span>
-            <span className="flex items-center gap-1.5">
-              <span className="rounded bg-navy-600 px-1 text-[10px] font-bold text-white">
-                Resort
-              </span>
-              <span className="rounded bg-sunset-400 px-1 text-[10px] font-bold text-navy-900">
-                Hall
-              </span>
-            </span>
           </div>
 
-          <div className="grid grid-cols-7 gap-1">
+          <div
+            className="grid grid-cols-7 gap-1 touch-pan-y"
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+          >
             {WEEKDAYS.map((w) => (
               <div
                 key={w}
@@ -181,14 +227,11 @@ export function CalendarBoard({
             ))}
 
             {cells.map((cell) => {
-              const dayBookings = byDate.get(cell.key) ?? [];
-              const resortSlots = dayBookings
-                .filter((b) => b.resource === "RESORT")
-                .map((b) => b.slot);
-              const hallSlots = dayBookings
-                .filter((b) => b.resource === "FUNCTION_HALL")
-                .map((b) => b.slot);
-              const resortAvail = availabilityFor(resortSlots);
+              const dayBookings = coverByDate.get(cell.key) ?? [];
+              const resortAvail = availabilityOn(
+                cell.key,
+                occByResource.get("RESORT") ?? []
+              );
 
               const isSelected = cell.key === selected;
               const isToday = cell.key === today;
@@ -224,22 +267,31 @@ export function CalendarBoard({
                     {cell.day}
                   </span>
                   <span className="flex flex-col gap-0.5">
-                    {resortSlots.map((s, i) => (
-                      <span
-                        key={`r-${i}`}
-                        className="truncate rounded bg-navy-600 px-1 text-[10px] font-semibold leading-tight text-white"
-                      >
-                        {SLOT_SHORT[s]}
-                      </span>
-                    ))}
-                    {hallSlots.map((s, i) => (
-                      <span
-                        key={`h-${i}`}
-                        className="truncate rounded bg-sunset-400 px-1 text-[10px] font-semibold leading-tight text-navy-900"
-                      >
-                        Hall · {SLOT_SHORT[s]}
-                      </span>
-                    ))}
+                    {dayBookings.map((b) => {
+                      const isHall = b.resource === "FUNCTION_HALL";
+                      const multi = b.date !== b.endDate;
+                      const cont =
+                        multi && b.date !== cell.key ? "‹ " : "";
+                      const tail =
+                        multi && b.endDate !== cell.key ? " ›" : "";
+                      return (
+                        <span
+                          key={b.id}
+                          className={[
+                            "truncate rounded px-1 text-[10px] font-semibold leading-tight",
+                            isHall
+                              ? "bg-sunset-400 text-navy-900"
+                              : "bg-navy-600 text-white",
+                            b.status === "PENDING" ? "opacity-60" : "",
+                          ].join(" ")}
+                        >
+                          {cont}
+                          {isHall ? "Hall · " : ""}
+                          {SLOT_SHORT[b.slot]}
+                          {tail}
+                        </span>
+                      );
+                    })}
                   </span>
                 </button>
               );
@@ -265,7 +317,10 @@ export function CalendarBoard({
               const list = selectedBookings.filter(
                 (b) => b.resource === resource
               );
-              const avail = availabilityFor(list.map((b) => b.slot));
+              const openSlots = availableSlotsOn(
+                selected,
+                occByResource.get(resource) ?? []
+              );
               return (
                 <div
                   key={resource}
@@ -277,7 +332,7 @@ export function CalendarBoard({
                     </span>
                     <button
                       onClick={() => setModal({ resource })}
-                      disabled={avail === "full"}
+                      disabled={openSlots.length === 0}
                       className="rounded-lg bg-navy-700 px-2.5 py-1 text-xs font-semibold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       + Add
@@ -288,52 +343,74 @@ export function CalendarBoard({
                     <p className="text-xs text-navy-400">Available.</p>
                   ) : (
                     <ul className="flex flex-col gap-2">
-                      {list.map((b) => (
-                        <li
-                          key={b.id}
-                          className="rounded-lg border border-sky-border bg-white p-2.5"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-navy-800">
-                                {b.guestName}
-                              </p>
-                              <p className="text-xs text-navy-500">
-                                {SLOT_LABELS[b.slot]}
-                                {b.pax ? ` · ${b.pax} pax` : ""}
-                              </p>
-                              {b.guestPhone && (
+                      {list.map((b) => {
+                        const times = timeRange(b);
+                        return (
+                          <li
+                            key={b.id}
+                            className="rounded-lg border border-sky-border bg-white p-2.5"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-navy-800">
+                                  {b.guestName}
+                                  {b.source === "GUEST" && (
+                                    <span className="ml-1.5 rounded bg-sky-panel px-1 text-[9px] font-bold uppercase text-navy-500">
+                                      Guest
+                                    </span>
+                                  )}
+                                </p>
+                                <p className="text-xs text-navy-500">
+                                  {SLOT_LABELS[b.slot]}
+                                  {b.pax ? ` · ${b.pax} pax` : ""}
+                                </p>
                                 <p className="text-xs text-navy-400">
-                                  {b.guestPhone}
+                                  {dateRange(b)}
                                 </p>
-                              )}
-                              {b.notes && (
-                                <p className="mt-1 text-xs italic text-navy-400">
-                                  {b.notes}
+                                <p className="text-xs font-medium text-navy-500">
+                                  {times ?? "Time to be set"}
                                 </p>
-                              )}
+                                {b.guestPhone && (
+                                  <p className="text-xs text-navy-400">
+                                    {b.guestPhone}
+                                  </p>
+                                )}
+                                {b.notes && (
+                                  <p className="mt-1 text-xs italic text-navy-400">
+                                    {b.notes}
+                                  </p>
+                                )}
+                              </div>
+                              <StatusBadge status={b.status} />
                             </div>
-                            <StatusBadge status={b.status} />
-                          </div>
-                          <form action={cancelBooking} className="mt-2 text-right">
-                            <input type="hidden" name="id" value={b.id} />
-                            <button
-                              type="submit"
-                              onClick={(e) => {
-                                if (
-                                  !window.confirm(
-                                    `Cancel ${b.guestName}'s reservation?`
-                                  )
-                                )
-                                  e.preventDefault();
-                              }}
-                              className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
-                            >
-                              Cancel reservation
-                            </button>
-                          </form>
-                        </li>
-                      ))}
+
+                            {b.status === "PENDING" ? (
+                              <ConfirmControl booking={b} onDone={refresh} />
+                            ) : (
+                              <form
+                                action={cancelBooking}
+                                className="mt-2 text-right"
+                              >
+                                <input type="hidden" name="id" value={b.id} />
+                                <button
+                                  type="submit"
+                                  onClick={(e) => {
+                                    if (
+                                      !window.confirm(
+                                        `Cancel ${b.guestName}'s reservation?`
+                                      )
+                                    )
+                                      e.preventDefault();
+                                  }}
+                                  className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
+                                >
+                                  Cancel reservation
+                                </button>
+                              </form>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </div>
@@ -366,7 +443,7 @@ export function CalendarBoard({
             </div>
             <BookingForm
               date={selected}
-              bookingsForDate={selectedBookings}
+              occByResource={occByResource}
               defaultResource={modal.resource}
               onSuccess={closeModalAndRefresh}
               onCancel={() => setModal(null)}
