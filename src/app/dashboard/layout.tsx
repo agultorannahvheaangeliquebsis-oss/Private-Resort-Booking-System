@@ -1,5 +1,6 @@
 import { auth, signOut } from "@/lib/auth";
 import { Brandmark } from "@/components/Brandmark";
+import { PushToggle } from "@/components/PushToggle";
 
 export default async function DashboardLayout({
   children,
@@ -35,6 +36,7 @@ export default async function DashboardLayout({
                 {session.user.name}
               </span>
             )}
+            <PushToggle />
             <form action={handleSignOut}>
               <button
                 type="submit"

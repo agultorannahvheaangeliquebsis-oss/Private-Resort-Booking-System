@@ -38,13 +38,29 @@ enum BookingStatus {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  name         String
-  email        String    @unique
-  passwordHash String
-  role         Role      @default(GUEST)
-  createdAt    DateTime  @default(now())
-  bookings     Booking[]
+  id            String             @id @default(cuid())
+  name          String
+  email         String             @unique
+  passwordHash  String
+  role          Role               @default(GUEST)
+  createdAt     DateTime           @default(now())
+  bookings      Booking[]
+  pushSubs      PushSubscription[]
+}
+
+// A single browser/device that has opted in to web push notifications.
+// One user may have several (phone, laptop, ...). Keyed by the push
+// service endpoint, which is unique per device+browser.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model Booking {

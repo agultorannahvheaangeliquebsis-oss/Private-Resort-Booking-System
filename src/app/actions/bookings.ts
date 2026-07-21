@@ -13,6 +13,7 @@ import {
   slotsConflict,
 } from "@/lib/booking";
 import { dateKeyToUTC, isValidDateKey, todayKey } from "@/lib/dates";
+import { notifyAdmins } from "@/lib/push";
 
 export type BookingActionState =
   | { ok: true }
@@ -128,6 +129,29 @@ export async function createBooking(
     }
     throw error;
   }
+
+  // Notify owners (best-effort; never blocks or fails the booking).
+  const prettyDate = new Date(`${date}T00:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const details = [
+    guestName,
+    SLOT_LABELS[slot],
+    prettyDate,
+    pax ? `${pax} pax` : null,
+    status === "PENDING" ? "Pending" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  await notifyAdmins({
+    title: `🏝️ New booking — ${RESOURCE_LABELS[resource]}`,
+    body: details,
+    url: "/dashboard",
+    tag: "new-booking",
+  });
 
   revalidatePath("/dashboard");
   return { ok: true };
