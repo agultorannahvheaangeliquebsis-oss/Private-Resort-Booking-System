@@ -1,8 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
 import { createBooking, type BookingActionState } from "@/app/actions/bookings";
-import { parseBookingInquiry } from "@/app/actions/parseBooking";
 import {
   MAX_GUESTS,
   SLEEPING_CAPACITY,
@@ -11,7 +10,7 @@ import {
   slotWindowLabel,
   type Occupancy,
 } from "@/lib/booking";
-import { formatShortDate, isValidDateKey, nightsBetween } from "@/lib/dates";
+import { formatShortDate, nightsBetween } from "@/lib/dates";
 
 const inputClass =
   "rounded-lg border border-sky-border bg-white px-3 py-2 text-sm text-navy-800 outline-none transition focus:border-navy-400 focus:ring-2 focus:ring-navy-200";
@@ -34,47 +33,6 @@ export function BookingForm({
     BookingActionState,
     FormData
   >(createBooking, undefined);
-
-  const guestNameRef = useRef<HTMLInputElement>(null);
-  const slotRef = useRef<HTMLSelectElement>(null);
-  const [showPaste, setShowPaste] = useState(false);
-  const [pasteText, setPasteText] = useState("");
-  const [parseError, setParseError] = useState<string | null>(null);
-  const [parsing, startParsing] = useTransition();
-
-  function handleParse() {
-    setParseError(null);
-    startParsing(async () => {
-      const result = await parseBookingInquiry(pasteText);
-      if (!result.ok) {
-        setParseError(result.error);
-        return;
-      }
-      const data = result.data;
-      if (data.guestName && guestNameRef.current) {
-        guestNameRef.current.value = data.guestName;
-      }
-      if (data.checkInDate && isValidDateKey(data.checkInDate)) {
-        setCheckIn(data.checkInDate);
-        const checkOutValid =
-          data.checkOutDate &&
-          isValidDateKey(data.checkOutDate) &&
-          data.checkOutDate >= data.checkInDate;
-        setCheckOut(checkOutValid ? data.checkOutDate! : data.checkInDate);
-      }
-      if (typeof data.numberOfGuests === "number" && data.numberOfGuests > 0) {
-        setPax(String(data.numberOfGuests));
-      }
-      if (data.timeSlot && slotRef.current) {
-        const slot = data.timeSlot;
-        requestAnimationFrame(() => {
-          if (slotRef.current) slotRef.current.value = slot;
-        });
-      }
-      setShowPaste(false);
-      setPasteText("");
-    });
-  }
 
   const nights = nightsBetween(checkIn, checkOut);
   const isMultiDay = nights >= 1;
@@ -103,44 +61,6 @@ export function BookingForm({
       <input type="hidden" name="date" value={checkIn} />
       <input type="hidden" name="endDate" value={checkOut} />
       {isMultiDay && <input type="hidden" name="slot" value="OVERNIGHT" />}
-
-      <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={() => setShowPaste((v) => !v)}
-          className="self-start text-xs font-semibold text-navy-600 underline underline-offset-2"
-        >
-          {showPaste ? "Hide" : "📋 Paste from Messenger"}
-        </button>
-        {showPaste && (
-          <div className="flex flex-col gap-2 rounded-lg border border-sky-border bg-sky-panel/40 p-3">
-            <textarea
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-              rows={4}
-              placeholder="Paste the guest's inquiry text here…"
-              className={inputClass}
-            />
-            {parseError && (
-              <p className="text-xs font-medium text-red-700">{parseError}</p>
-            )}
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleParse}
-                disabled={parsing || !pasteText.trim()}
-                className="rounded-lg bg-navy-700 px-3 py-1.5 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {parsing ? "Parsing…" : "Parse & Fill Form"}
-              </button>
-            </div>
-            <p className="text-[11px] text-navy-500">
-              Review every field below before reserving — the parser fills in
-              what it can and leaves the rest blank.
-            </p>
-          </div>
-        )}
-      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="flex flex-col gap-1.5">
@@ -177,7 +97,6 @@ export function BookingForm({
             Booking type
           </span>
           <select
-            ref={slotRef}
             name="slot"
             className={inputClass}
             disabled={noSlots}
@@ -243,7 +162,7 @@ export function BookingForm({
             <span className="text-xs font-semibold text-navy-700">
               Guest name <span className="text-red-500">*</span>
             </span>
-            <input ref={guestNameRef} name="guestName" required className={inputClass} />
+            <input name="guestName" required className={inputClass} />
           </label>
 
           <div className="grid grid-cols-2 gap-3">
