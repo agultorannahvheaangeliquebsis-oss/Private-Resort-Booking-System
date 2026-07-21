@@ -77,11 +77,13 @@ export async function parseBookingInquiry(
         `never guess or invent a value.`,
       messages: [{ role: "user", content: trimmed }],
     });
-  } catch {
-    return {
-      ok: false,
-      error: "Couldn't reach the parser right now. Please fill in the form manually.",
-    };
+  } catch (error) {
+    console.error("parseBookingInquiry: Anthropic API call failed", error);
+    const message =
+      error instanceof Anthropic.AuthenticationError
+        ? "The AI parser isn't configured (missing or invalid API key). Please fill in the form manually."
+        : "Couldn't reach the parser right now. Please fill in the form manually.";
+    return { ok: false, error: message };
   }
 
   if (response.stop_reason === "refusal") {
