@@ -4,6 +4,14 @@ import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
 import { authConfig } from "./auth.config";
 
+/** Ensure the caller is a signed-in ADMIN; returns their session user. */
+export async function requireAdmin() {
+  const session = await auth();
+  if (!session?.user) throw new Error("Unauthorized");
+  if (session.user.role !== "ADMIN") throw new Error("Forbidden");
+  return session.user;
+}
+
 export const { auth, signIn, signOut, handlers } = NextAuth({
   ...authConfig,
   providers: [

@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import type { Role } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export type UserActionState =
@@ -13,14 +13,6 @@ export type UserActionState =
   | undefined;
 
 const ROLES: Role[] = ["GUEST", "ADMIN"];
-
-/** Ensure the caller is a signed-in ADMIN; returns their user id. */
-async function requireAdmin(): Promise<string> {
-  const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
-  if (session.user.role !== "ADMIN") throw new Error("Forbidden");
-  return session.user.id;
-}
 
 /** Create a staff/admin account from the user-management panel. */
 export async function createUser(
@@ -69,7 +61,7 @@ export async function createUser(
 
 /** Change a user's role. Admins can't demote their own account. */
 export async function setUserRole(formData: FormData): Promise<void> {
-  const adminId = await requireAdmin();
+  const adminId = (await requireAdmin()).id;
 
   const id = String(formData.get("id") ?? "");
   const roleRaw = String(formData.get("role") ?? "") as Role;
@@ -92,7 +84,7 @@ export async function deleteUser(
 ): Promise<UserActionState> {
   let adminId: string;
   try {
-    adminId = await requireAdmin();
+    adminId = (await requireAdmin()).id;
   } catch {
     return { ok: false, error: "Only administrators can delete users." };
   }

@@ -3,8 +3,9 @@
 import { Prisma } from "@prisma/client";
 import type { BookingSlot, BookingStatus, PrismaClient } from "@prisma/client";
 import { revalidatePath } from "next/cache";
-import { auth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, rateLimit } from "@/lib/rate-limit";
 import {
   BOOKING_SLOTS,
   MAX_GUESTS,
@@ -31,6 +32,10 @@ export type BookingActionState =
 // message rather than an unexpected error.
 class ConflictError extends Error {}
 
+// Thrown for a plain input-validation problem (e.g. a malformed time), kept
+// distinct from ConflictError since it's a form error, not a scheduling clash.
+class ValidationError extends Error {}
+
 function optionalString(value: FormDataEntryValue | null): string | null {
   const s = typeof value === "string" ? value.trim() : "";
   return s.length > 0 ? s : null;
@@ -42,7 +47,7 @@ function optionalTime(value: FormDataEntryValue | null): string | null {
   if (s === null) return null;
   const m = /^(\d{1,2}):(\d{2})$/.exec(s);
   if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) {
-    throw new ConflictError("Please enter a valid time.");
+    throw new ValidationError("Please enter a valid time.");
   }
   return `${m[1].padStart(2, "0")}:${m[2]}`;
 }
@@ -156,8 +161,12 @@ export async function createBooking(
   _prev: BookingActionState,
   formData: FormData
 ): Promise<BookingActionState> {
-  const session = await auth();
-  if (!session?.user) return { ok: false, error: "You must be signed in." };
+  let admin: Awaited<ReturnType<typeof requireAdmin>>;
+  try {
+    admin = await requireAdmin();
+  } catch {
+    return { ok: false, error: "Only administrators can manage bookings." };
+  }
 
   const parsed = parseRange(formData);
   if (!parsed.ok) return parsed;
@@ -220,7 +229,7 @@ export async function createBooking(
             guestEmail,
             pax,
             notes,
-            createdById: session.user.id,
+            createdById: admin.id,
           },
         });
       },
@@ -261,6 +270,15 @@ export async function createRequest(
   _prev: BookingActionState,
   formData: FormData
 ): Promise<BookingActionState> {
+  const ip = await getClientIp();
+  const limited = rateLimit(`createRequest:${ip}`, 5, 15 * 60 * 1000);
+  if (!limited.ok) {
+    return {
+      ok: false,
+      error: "Too many requests. Please try again in a few minutes.",
+    };
+  }
+
   const parsed = parseRange(formData);
   if (!parsed.ok) return parsed;
   const { slot, date, endDate } = parsed;
@@ -347,8 +365,11 @@ export async function confirmBooking(
   _prev: BookingActionState,
   formData: FormData
 ): Promise<BookingActionState> {
-  const session = await auth();
-  if (!session?.user) return { ok: false, error: "You must be signed in." };
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: "Only administrators can manage bookings." };
+  }
 
   const id = String(formData.get("id") ?? "");
   if (!id) return { ok: false, error: "Missing booking id." };
@@ -399,11 +420,13 @@ export async function confirmBooking(
   return { ok: true };
 }
 
-// --- Owner: decline / cancel / delete ------------------------------------
+// --- Owner: decline / cancel ----------------------------------------------
 
-export async function declineBooking(formData: FormData): Promise<void> {
-  const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
+// Soft-cancel: frees the dates but keeps the record. Declining a pending
+// request and cancelling a confirmed booking are the same operation under
+// the hood — kept as two exported names since callers address them by intent.
+async function setCancelled(formData: FormData): Promise<void> {
+  await requireAdmin();
 
   const id = String(formData.get("id") ?? "");
   if (!id) throw new Error("Missing booking id");
@@ -416,35 +439,12 @@ export async function declineBooking(formData: FormData): Promise<void> {
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/calendar");
   revalidatePath("/book");
+}
+
+export async function declineBooking(formData: FormData): Promise<void> {
+  await setCancelled(formData);
 }
 
 export async function cancelBooking(formData: FormData): Promise<void> {
-  const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
-
-  const id = String(formData.get("id") ?? "");
-  if (!id) throw new Error("Missing booking id");
-
-  // Soft-cancel: frees the dates but keeps the record.
-  await prisma.booking.update({
-    where: { id },
-    data: { status: "CANCELLED" },
-  });
-
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/calendar");
-  revalidatePath("/book");
-}
-
-export async function deleteBooking(formData: FormData): Promise<void> {
-  const session = await auth();
-  if (!session?.user) throw new Error("Unauthorized");
-
-  const id = String(formData.get("id") ?? "");
-  if (!id) throw new Error("Missing booking id");
-
-  await prisma.booking.delete({ where: { id } });
-  revalidatePath("/dashboard");
-  revalidatePath("/dashboard/calendar");
-  revalidatePath("/book");
+  await setCancelled(formData);
 }
