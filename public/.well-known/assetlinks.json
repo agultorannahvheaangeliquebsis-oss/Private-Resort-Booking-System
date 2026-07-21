@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "fabiansazzure.com",
+      "sha256_cert_fingerprints": [
+        "7C:AC:56:D1:D4:15:BF:97:89:E6:CA:BB:3B:D8:14:FB:40:9B:1E:F8:5A:BF:F8:F4:9E:C9:3D:5B:E1:20:BB:99"
+      ]
+    }
+  }
+]
