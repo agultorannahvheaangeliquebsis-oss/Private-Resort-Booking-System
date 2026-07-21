@@ -3,6 +3,8 @@
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { createBooking, type BookingActionState } from "@/app/actions/bookings";
 import {
+  MAX_GUESTS,
+  SLEEPING_CAPACITY,
   SLOT_LABELS,
   availableSlotsOn,
   slotWindowLabel,
@@ -26,6 +28,7 @@ export function BookingForm({
 }) {
   const [checkIn, setCheckIn] = useState(date);
   const [checkOut, setCheckOut] = useState(date);
+  const [pax, setPax] = useState("");
   const [state, formAction, pending] = useActionState<
     BookingActionState,
     FormData
@@ -171,11 +174,24 @@ export function BookingForm({
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold text-navy-700">
-                No. of guests
+                No. of sleeping guests
               </span>
-              <input name="pax" inputMode="numeric" className={inputClass} />
+              <input
+                name="pax"
+                inputMode="numeric"
+                value={pax}
+                onChange={(e) => setPax(e.target.value.replace(/[^0-9]/g, ""))}
+                className={inputClass}
+              />
             </label>
           </div>
+
+          {Number(pax) > SLEEPING_CAPACITY && (
+            <p className="rounded-lg bg-sunset-100 px-3 py-2 text-xs font-medium text-navy-700">
+              Sleeping capacity is {SLEEPING_CAPACITY}. Guests beyond that (up
+              to {MAX_GUESTS} max) carry additional charges.
+            </p>
+          )}
 
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-navy-700">Email</span>

@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   BOOKING_SLOTS,
+  MAX_GUESTS,
   SLOT_LABELS,
   bookingsConflict,
   type Occupancy,
@@ -188,6 +189,9 @@ export async function createBooking(
     if (!Number.isInteger(n) || n < 1) {
       return { ok: false, error: "Number of guests must be a positive number." };
     }
+    if (n > MAX_GUESTS) {
+      return { ok: false, error: `Maximum of ${MAX_GUESTS} guests allowed.` };
+    }
     pax = n;
   }
 
@@ -278,6 +282,9 @@ export async function createRequest(
   const pax = Number(paxRaw);
   if (!Number.isInteger(pax) || pax < 1) {
     return { ok: false, error: "Number of guests must be a positive number." };
+  }
+  if (pax > MAX_GUESTS) {
+    return { ok: false, error: `Maximum of ${MAX_GUESTS} guests allowed.` };
   }
 
   try {

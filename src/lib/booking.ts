@@ -11,6 +11,14 @@ export const SLOT_LABELS: Record<BookingSlot, string> = {
 
 export const BOOKING_SLOTS: BookingSlot[] = ["DAY", "NIGHT", "OVERNIGHT"];
 
+// --- Guest capacity ---------------------------------------------------------
+//
+// The resort sleeps 70 comfortably. The owner allows overflow up to 90 with
+// additional charges, but never beyond that.
+
+export const SLEEPING_CAPACITY = 70;
+export const MAX_GUESTS = 90;
+
 // --- Slot time windows ----------------------------------------------------
 //
 // Guests only pick a coarse slot; the owner enters exact times later. Until

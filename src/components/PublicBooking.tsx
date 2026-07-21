@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import type { BookingSlot, BookingStatus } from "@prisma/client";
 import { createRequest, type BookingActionState } from "@/app/actions/bookings";
 import {
+  MAX_GUESTS,
+  SLEEPING_CAPACITY,
   SLOT_LABELS,
   availabilityOn,
   availableSlotsOn,
@@ -70,7 +72,9 @@ function RequestForm({
   );
 
   function bumpPax(delta: number) {
-    setPax((p) => String(Math.max(1, (parseInt(p, 10) || 0) + delta)));
+    setPax((p) =>
+      String(Math.min(MAX_GUESTS, Math.max(1, (parseInt(p, 10) || 0) + delta)))
+    );
   }
 
   const nights = nightsBetween(checkIn, checkOut);
@@ -188,7 +192,7 @@ function RequestForm({
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold text-navy-700">
-                No. of guests <span className="text-red-500">*</span>
+                No. of sleeping guests <span className="text-red-500">*</span>
               </span>
               <div className="flex items-stretch overflow-hidden rounded-lg border border-sky-border bg-white transition focus-within:border-navy-400 focus-within:ring-2 focus-within:ring-navy-200">
                 <button
@@ -204,7 +208,15 @@ function RequestForm({
                   inputMode="numeric"
                   required
                   value={pax}
-                  onChange={(e) => setPax(e.target.value.replace(/[^0-9]/g, ""))}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/[^0-9]/g, "");
+                    const n = parseInt(digits, 10);
+                    setPax(
+                      digits === ""
+                        ? ""
+                        : String(Math.min(MAX_GUESTS, n || 0))
+                    );
+                  }}
                   className="w-full min-w-0 border-x border-sky-border px-2 py-2 text-center text-sm text-navy-800 outline-none"
                 />
                 <button
@@ -218,6 +230,13 @@ function RequestForm({
               </div>
             </label>
           </div>
+
+          {Number(pax) > SLEEPING_CAPACITY && (
+            <p className="rounded-lg bg-sunset-100 px-3 py-2 text-xs font-medium text-navy-700">
+              Sleeping capacity is {SLEEPING_CAPACITY}. Guests beyond that (up
+              to {MAX_GUESTS} max) carry additional charges.
+            </p>
+          )}
 
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-navy-700">
