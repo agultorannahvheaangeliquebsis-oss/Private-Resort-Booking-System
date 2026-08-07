@@ -2,6 +2,16 @@
 
 A booking management platform built for a private resort that previously took reservations by hand over Messenger. Staff manage a shared calendar and confirm guest requests; guests submit booking requests through a public form and can look up their status with a reference code — no account required.
 
+## Screenshots
+
+| Guest booking request | Guest status lookup |
+|---|---|
+| ![Public availability calendar and booking request form](docs/screenshots/book-request.png) | ![Guest reference-code status lookup](docs/screenshots/status-lookup.png) |
+
+| Staff dashboard | Staff calendar |
+|---|---|
+| ![Staff dashboard overview](docs/screenshots/dashboard.png) | ![Staff calendar with availability](docs/screenshots/dashboard-calendar.png) |
+
 ## Why this exists
 
 The resort offers three overlapping booking types — day tours, night tours, and overnight stays — each with different, midnight-crossing time windows, plus multi-day stays and an optional function hall add-on. Preventing double-bookings across all of that isn't a simple date-equality check: two reservations can be on "different days" and still overlap the same physical timeslot. This project's core is that scheduling logic.
