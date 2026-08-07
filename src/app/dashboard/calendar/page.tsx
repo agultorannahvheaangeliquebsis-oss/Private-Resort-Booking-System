@@ -36,6 +36,7 @@ export default async function CalendarPage({
 
   const bookings: BookingLite[] = rows.map((r) => ({
     id: r.id,
+    reference: r.reference,
     slot: r.slot,
     status: r.status,
     source: r.source,

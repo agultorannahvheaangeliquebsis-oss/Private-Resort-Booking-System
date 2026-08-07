@@ -19,6 +19,7 @@ const HORIZON_DAYS = 7;
 
 function toLite(r: {
   id: string;
+  reference: string;
   slot: BookingLite["slot"];
   status: BookingLite["status"];
   source: BookingLite["source"];
@@ -35,6 +36,7 @@ function toLite(r: {
 }): BookingLite {
   return {
     id: r.id,
+    reference: r.reference,
     slot: r.slot,
     status: r.status,
     source: r.source,

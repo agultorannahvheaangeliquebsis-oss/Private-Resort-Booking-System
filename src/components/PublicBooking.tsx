@@ -2,6 +2,7 @@
 
 import { useActionState, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { BookingSlot, BookingStatus } from "@prisma/client";
 import { createRequest, type BookingActionState } from "@/app/actions/bookings";
 import {
@@ -105,6 +106,20 @@ function RequestForm({
           Fabian&apos;s Azzure will contact you to confirm your reservation and
           the exact time. Thank you!
         </p>
+        {state.reference && (
+          <div className="rounded-lg border border-sky-border bg-sky-bg/60 px-4 py-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-navy-500">
+              Your reference code
+            </p>
+            <p className="font-mono text-lg font-bold tracking-wider text-navy-800">
+              {state.reference}
+            </p>
+            <p className="mt-1 text-[11px] text-navy-400">
+              Save this to check your status at{" "}
+              <span className="font-semibold">/status</span>.
+            </p>
+          </div>
+        )}
         <button
           onClick={onDone}
           className="mt-1 rounded-lg bg-navy-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-navy-800"
@@ -508,7 +523,7 @@ export function PublicBooking({
       <header className="border-b border-sky-border bg-white/85 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-4">
           <Brandmark className="h-11 w-11 shrink-0" />
-          <div className="leading-tight">
+          <div className="min-w-0 flex-1 leading-tight">
             <p className="text-lg font-extrabold tracking-tight text-navy-800">
               Fabian&apos;s Azzure
             </p>
@@ -516,6 +531,12 @@ export function PublicBooking({
               Private Resort · Check availability
             </p>
           </div>
+          <Link
+            href="/status"
+            className="shrink-0 text-xs font-semibold text-navy-600 hover:underline"
+          >
+            Check your status
+          </Link>
         </div>
       </header>
 

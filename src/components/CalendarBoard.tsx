@@ -24,6 +24,7 @@ import { BookingForm } from "./BookingForm";
 
 export type BookingLite = {
   id: string;
+  reference: string;
   slot: BookingSlot;
   status: BookingStatus;
   source: BookingSource;
@@ -83,6 +84,7 @@ function SelectedDatePanel({
   bookings,
   occupancy,
   onAdd,
+  onEdit,
   onRefresh,
   hideHeader,
 }: {
@@ -90,6 +92,7 @@ function SelectedDatePanel({
   bookings: BookingLite[];
   occupancy: Occupancy[];
   onAdd: () => void;
+  onEdit: (booking: BookingLite) => void;
   onRefresh: () => void;
   hideHeader?: boolean;
 }) {
@@ -143,6 +146,9 @@ function SelectedDatePanel({
                           </span>
                         )}
                       </p>
+                      <p className="font-mono text-[10px] tracking-wide text-navy-400">
+                        {b.reference}
+                      </p>
                       <p className="text-xs text-navy-500">
                         {SLOT_LABELS[b.slot]}
                         {b.pax ? ` · ${b.pax} pax` : ""}
@@ -165,25 +171,43 @@ function SelectedDatePanel({
                   </div>
 
                   {b.status === "PENDING" ? (
-                    <ConfirmControl booking={b} onDone={onRefresh} />
+                    <>
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          onClick={() => onEdit(b)}
+                          className="text-xs font-semibold text-navy-600 hover:text-navy-800 hover:underline"
+                        >
+                          Edit details
+                        </button>
+                      </div>
+                      <ConfirmControl booking={b} onDone={onRefresh} />
+                    </>
                   ) : (
-                    <form action={cancelBooking} className="mt-2 text-right">
-                      <input type="hidden" name="id" value={b.id} />
+                    <div className="mt-2 flex items-center justify-end gap-3">
                       <button
-                        type="submit"
-                        onClick={(e) => {
-                          if (
-                            !window.confirm(
-                              `Cancel ${b.guestName}'s reservation?`
-                            )
-                          )
-                            e.preventDefault();
-                        }}
-                        className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
+                        onClick={() => onEdit(b)}
+                        className="text-xs font-semibold text-navy-600 hover:text-navy-800 hover:underline"
                       >
-                        Cancel reservation
+                        Edit
                       </button>
-                    </form>
+                      <form action={cancelBooking}>
+                        <input type="hidden" name="id" value={b.id} />
+                        <button
+                          type="submit"
+                          onClick={(e) => {
+                            if (
+                              !window.confirm(
+                                `Cancel ${b.guestName}'s reservation?`
+                              )
+                            )
+                              e.preventDefault();
+                          }}
+                          className="text-xs font-semibold text-red-600 hover:text-red-700 hover:underline"
+                        >
+                          Cancel reservation
+                        </button>
+                      </form>
+                    </div>
                   )}
                 </li>
               );
@@ -215,7 +239,7 @@ export function CalendarBoard({
   const defaultSelected = todayInMonth ? today : firstInMonth;
 
   const [selected, setSelected] = useState(defaultSelected);
-  const [modal, setModal] = useState(false);
+  const [modal, setModal] = useState<"add" | { booking: BookingLite } | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [slideDir, setSlideDir] = useState<"forward" | "back">("forward");
 
@@ -300,9 +324,16 @@ export function CalendarBoard({
     router.refresh();
   }
   function closeModalAndRefresh() {
-    setModal(false);
+    setModal(null);
     router.refresh();
   }
+
+  // Occupancy for the booking-form's own open-slots calc: when editing, the
+  // booking being edited must not count against itself.
+  const formOccupancy =
+    modal && modal !== "add"
+      ? bookings.filter((b) => b.id !== modal.booking.id).map(asOccupancy)
+      : occupancy;
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
@@ -455,7 +486,8 @@ export function CalendarBoard({
             date={selected}
             bookings={selectedBookings}
             occupancy={occupancy}
-            onAdd={() => setModal(true)}
+            onAdd={() => setModal("add")}
+            onEdit={(b) => setModal({ booking: b })}
             onRefresh={refresh}
           />
         </div>
@@ -463,7 +495,7 @@ export function CalendarBoard({
 
       {/* Floating action button — quick add, always reachable */}
       <button
-        onClick={() => setModal(true)}
+        onClick={() => setModal("add")}
         aria-label="New reservation"
         className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] right-5 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-sunset-400 text-3xl font-bold leading-none text-navy-900 shadow-lg shadow-navy-900/25 transition hover:bg-sunset-500 active:scale-95"
       >
@@ -497,7 +529,11 @@ export function CalendarBoard({
               occupancy={occupancy}
               onAdd={() => {
                 setSheetOpen(false);
-                setModal(true);
+                setModal("add");
+              }}
+              onEdit={(b) => {
+                setSheetOpen(false);
+                setModal({ booking: b });
               }}
               onRefresh={refresh}
               hideHeader
@@ -511,17 +547,17 @@ export function CalendarBoard({
         <div
           className="fixed inset-0 z-50 overflow-y-auto bg-navy-900/40 p-4 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setModal(false);
+            if (e.target === e.currentTarget) setModal(null);
           }}
         >
           <div className="flex min-h-full items-center justify-center">
             <div className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-card border border-sky-border bg-white p-5 shadow-2xl">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-lg font-extrabold text-navy-800">
-                  New reservation
+                  {modal === "add" ? "New reservation" : "Edit reservation"}
                 </h3>
                 <button
-                  onClick={() => setModal(false)}
+                  onClick={() => setModal(null)}
                   className="text-navy-400 hover:text-navy-700"
                   aria-label="Close"
                 >
@@ -529,10 +565,11 @@ export function CalendarBoard({
                 </button>
               </div>
               <BookingForm
-                date={selected}
-                occupancy={occupancy}
+                date={modal === "add" ? selected : modal.booking.date}
+                occupancy={formOccupancy}
+                booking={modal === "add" ? undefined : modal.booking}
                 onSuccess={closeModalAndRefresh}
-                onCancel={() => setModal(false)}
+                onCancel={() => setModal(null)}
               />
             </div>
           </div>

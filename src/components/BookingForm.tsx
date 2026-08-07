@@ -1,7 +1,11 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useState } from "react";
-import { createBooking, type BookingActionState } from "@/app/actions/bookings";
+import {
+  createBooking,
+  updateBooking,
+  type BookingActionState,
+} from "@/app/actions/bookings";
 import {
   MAX_GUESTS,
   SLEEPING_CAPACITY,
@@ -11,6 +15,7 @@ import {
   type Occupancy,
 } from "@/lib/booking";
 import { formatShortDate, nightsBetween } from "@/lib/dates";
+import type { BookingLite } from "./CalendarBoard";
 
 const inputClass =
   "rounded-lg border border-sky-border bg-white px-3 py-2 text-sm text-navy-800 outline-none transition focus:border-navy-400 focus:ring-2 focus:ring-navy-200";
@@ -18,21 +23,24 @@ const inputClass =
 export function BookingForm({
   date,
   occupancy,
+  booking,
   onSuccess,
   onCancel,
 }: {
   date: string;
   occupancy: Occupancy[];
+  /** When editing an existing booking, its current details (details only — status is unaffected). */
+  booking?: BookingLite;
   onSuccess: () => void;
   onCancel: () => void;
 }) {
-  const [checkIn, setCheckIn] = useState(date);
-  const [checkOut, setCheckOut] = useState(date);
-  const [pax, setPax] = useState("");
+  const [checkIn, setCheckIn] = useState(booking?.date ?? date);
+  const [checkOut, setCheckOut] = useState(booking?.endDate ?? date);
+  const [pax, setPax] = useState(booking?.pax != null ? String(booking.pax) : "");
   const [state, formAction, pending] = useActionState<
     BookingActionState,
     FormData
-  >(createBooking, undefined);
+  >(booking ? updateBooking : createBooking, undefined);
 
   const nights = nightsBetween(checkIn, checkOut);
   const isMultiDay = nights >= 1;
@@ -58,6 +66,7 @@ export function BookingForm({
 
   return (
     <form action={formAction} className="flex flex-col gap-4">
+      {booking && <input type="hidden" name="id" value={booking.id} />}
       <input type="hidden" name="date" value={checkIn} />
       <input type="hidden" name="endDate" value={checkOut} />
       {isMultiDay && <input type="hidden" name="slot" value="OVERNIGHT" />}
@@ -100,6 +109,7 @@ export function BookingForm({
             name="slot"
             className={inputClass}
             disabled={noSlots}
+            defaultValue={booking?.slot}
             required
           >
             {openSlots.map((s) => (
@@ -121,6 +131,7 @@ export function BookingForm({
             <input
               type="checkbox"
               name="functionHallAircon"
+              defaultChecked={booking?.functionHallAircon}
               className="mt-0.5 h-4 w-4 rounded border-sky-border text-navy-700 focus:ring-navy-300"
             />
             <span className="text-xs text-navy-700">
@@ -142,13 +153,23 @@ export function BookingForm({
                 <span className="text-[11px] font-semibold text-navy-500">
                   Check-in time
                 </span>
-                <input type="time" name="startTime" className={inputClass} />
+                <input
+                  type="time"
+                  name="startTime"
+                  defaultValue={booking?.startTime ?? ""}
+                  className={inputClass}
+                />
               </label>
               <label className="flex flex-col gap-1.5">
                 <span className="text-[11px] font-semibold text-navy-500">
                   Check-out time
                 </span>
-                <input type="time" name="endTime" className={inputClass} />
+                <input
+                  type="time"
+                  name="endTime"
+                  defaultValue={booking?.endTime ?? ""}
+                  className={inputClass}
+                />
               </label>
             </div>
             {!isMultiDay && openSlots.length > 0 && (
@@ -162,7 +183,12 @@ export function BookingForm({
             <span className="text-xs font-semibold text-navy-700">
               Guest name <span className="text-red-500">*</span>
             </span>
-            <input name="guestName" required className={inputClass} />
+            <input
+              name="guestName"
+              defaultValue={booking?.guestName}
+              required
+              className={inputClass}
+            />
           </label>
 
           <div className="grid grid-cols-2 gap-3">
@@ -170,7 +196,12 @@ export function BookingForm({
               <span className="text-xs font-semibold text-navy-700">
                 Contact number
               </span>
-              <input name="guestPhone" inputMode="tel" className={inputClass} />
+              <input
+                name="guestPhone"
+                inputMode="tel"
+                defaultValue={booking?.guestPhone ?? ""}
+                className={inputClass}
+              />
             </label>
             <label className="flex flex-col gap-1.5">
               <span className="text-xs font-semibold text-navy-700">
@@ -195,20 +226,32 @@ export function BookingForm({
 
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-navy-700">Email</span>
-            <input name="guestEmail" type="email" className={inputClass} />
+            <input
+              name="guestEmail"
+              type="email"
+              defaultValue={booking?.guestEmail ?? ""}
+              className={inputClass}
+            />
           </label>
 
-          <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-semibold text-navy-700">Status</span>
-            <select name="status" className={inputClass} defaultValue="CONFIRMED">
-              <option value="CONFIRMED">Confirmed</option>
-              <option value="PENDING">Pending / tentative</option>
-            </select>
-          </label>
+          {!booking && (
+            <label className="flex flex-col gap-1.5">
+              <span className="text-xs font-semibold text-navy-700">Status</span>
+              <select name="status" className={inputClass} defaultValue="CONFIRMED">
+                <option value="CONFIRMED">Confirmed</option>
+                <option value="PENDING">Pending / tentative</option>
+              </select>
+            </label>
+          )}
 
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-semibold text-navy-700">Notes</span>
-            <textarea name="notes" rows={2} className={inputClass} />
+            <textarea
+              name="notes"
+              rows={2}
+              defaultValue={booking?.notes ?? ""}
+              className={inputClass}
+            />
           </label>
         </>
       )}
@@ -235,7 +278,7 @@ export function BookingForm({
           disabled={pending || noSlots}
           className="rounded-lg bg-sunset-400 px-4 py-2 text-sm font-bold text-navy-900 shadow-sm transition hover:bg-sunset-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {pending ? "Saving…" : "Reserve"}
+          {pending ? "Saving…" : booking ? "Save changes" : "Reserve"}
         </button>
       </div>
     </form>

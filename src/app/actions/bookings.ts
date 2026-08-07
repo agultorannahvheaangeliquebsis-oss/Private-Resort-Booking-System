@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, rateLimit } from "@/lib/rate-limit";
+import { generateReference } from "@/lib/reference";
 import {
   BOOKING_SLOTS,
   MAX_GUESTS,
@@ -22,9 +23,14 @@ import {
   todayKey,
 } from "@/lib/dates";
 import { notifyAdmins } from "@/lib/push";
+import {
+  sendBookingConfirmedEmail,
+  sendRequestDeclinedEmail,
+  sendRequestReceivedEmail,
+} from "@/lib/mailer";
 
 export type BookingActionState =
-  | { ok: true }
+  | { ok: true; reference?: string }
   | { ok: false; error: string }
   | undefined;
 
@@ -35,6 +41,16 @@ class ConflictError extends Error {}
 // Thrown for a plain input-validation problem (e.g. a malformed time), kept
 // distinct from ConflictError since it's a form error, not a scheduling clash.
 class ValidationError extends Error {}
+
+/** True if a Prisma unique-constraint error was specifically on `reference`. */
+function isReferenceClash(error: unknown): boolean {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002" &&
+    Array.isArray(error.meta?.target) &&
+    (error.meta.target as string[]).includes("reference")
+  );
+}
 
 function optionalString(value: FormDataEntryValue | null): string | null {
   const s = typeof value === "string" ? value.trim() : "";
@@ -204,49 +220,58 @@ export async function createBooking(
     pax = n;
   }
 
-  try {
-    await prisma.$transaction(
-      async (tx) => {
-        await assertNoConflict(tx, {
-          date,
-          endDate,
-          slot,
-          startTime,
-          endTime,
-        });
-        await tx.booking.create({
-          data: {
+  let reference = generateReference();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          await assertNoConflict(tx, {
+            date,
+            endDate,
             slot,
-            status,
-            source: "STAFF",
-            date: dateKeyToUTC(date),
-            endDate: dateKeyToUTC(endDate),
             startTime,
             endTime,
-            functionHallAircon,
-            guestName,
-            guestPhone,
-            guestEmail,
-            pax,
-            notes,
-            createdById: admin.id,
-          },
-        });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
-  } catch (error) {
-    if (error instanceof ConflictError) return { ok: false, error: error.message };
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      (error.code === "P2002" || error.code === "P2034")
-    ) {
-      return {
-        ok: false,
-        error: "That slot was just booked by someone else. Please refresh.",
-      };
+          });
+          await tx.booking.create({
+            data: {
+              reference,
+              slot,
+              status,
+              source: "STAFF",
+              date: dateKeyToUTC(date),
+              endDate: dateKeyToUTC(endDate),
+              startTime,
+              endTime,
+              functionHallAircon,
+              guestName,
+              guestPhone,
+              guestEmail,
+              pax,
+              notes,
+              createdById: admin.id,
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+      break;
+    } catch (error) {
+      if (isReferenceClash(error) && attempt === 0) {
+        reference = generateReference();
+        continue;
+      }
+      if (error instanceof ConflictError) return { ok: false, error: error.message };
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === "P2002" || error.code === "P2034")
+      ) {
+        return {
+          ok: false,
+          error: "That slot was just booked by someone else. Please refresh.",
+        };
+      }
+      throw error;
     }
-    throw error;
   }
 
   await notifyNewBooking({
@@ -305,19 +330,151 @@ export async function createRequest(
     return { ok: false, error: `Maximum of ${MAX_GUESTS} guests allowed.` };
   }
 
+  let reference = generateReference();
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // Guest requests carry no exact times yet — the slot's default window
+          // decides whether the date is still open to request.
+          await assertNoConflict(tx, { date, endDate, slot });
+          await tx.booking.create({
+            data: {
+              reference,
+              slot,
+              status: "PENDING",
+              source: "GUEST",
+              date: dateKeyToUTC(date),
+              endDate: dateKeyToUTC(endDate),
+              functionHallAircon,
+              guestName,
+              guestPhone,
+              guestEmail,
+              pax,
+              notes,
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+      break;
+    } catch (error) {
+      if (isReferenceClash(error) && attempt === 0) {
+        reference = generateReference();
+        continue;
+      }
+      if (error instanceof ConflictError) return { ok: false, error: error.message };
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error.code === "P2002" || error.code === "P2034")
+      ) {
+        return {
+          ok: false,
+          error: "Those dates were just taken. Please pick another.",
+        };
+      }
+      throw error;
+    }
+  }
+
+  await notifyNewBooking({
+    slot,
+    date,
+    endDate,
+    guestName,
+    pax,
+    status: "PENDING",
+    isRequest: true,
+  });
+
+  if (guestEmail) {
+    await sendRequestReceivedEmail({
+      to: guestEmail,
+      guestName,
+      reference,
+      slot,
+      date,
+      endDate,
+    });
+  }
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/calendar");
+  revalidatePath("/book");
+  return { ok: true, reference };
+}
+
+// --- Staff: edit an existing booking's details ----------------------------
+//
+// Leaves status/source untouched — confirm/decline/cancel remain the only
+// way to change those. A cancelled booking can't be edited back to life.
+
+export async function updateBooking(
+  _prev: BookingActionState,
+  formData: FormData
+): Promise<BookingActionState> {
+  try {
+    await requireAdmin();
+  } catch {
+    return { ok: false, error: "Only administrators can manage bookings." };
+  }
+
+  const id = String(formData.get("id") ?? "");
+  if (!id) return { ok: false, error: "Missing booking id." };
+
+  const parsed = parseRange(formData);
+  if (!parsed.ok) return parsed;
+  const { slot, date, endDate } = parsed;
+
+  const guestName = String(formData.get("guestName") ?? "").trim();
+  const guestPhone = optionalString(formData.get("guestPhone"));
+  const guestEmail = optionalString(formData.get("guestEmail"));
+  const notes = optionalString(formData.get("notes"));
+  const paxRaw = optionalString(formData.get("pax"));
+  const functionHallAircon = formData.get("functionHallAircon") === "on";
+
+  let startTime: string | null;
+  let endTime: string | null;
+  try {
+    startTime = optionalTime(formData.get("startTime"));
+    endTime = optionalTime(formData.get("endTime"));
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+
+  if (!guestName) return { ok: false, error: "Guest name is required." };
+
+  let pax: number | null = null;
+  if (paxRaw !== null) {
+    const n = Number(paxRaw);
+    if (!Number.isInteger(n) || n < 1) {
+      return { ok: false, error: "Number of guests must be a positive number." };
+    }
+    if (n > MAX_GUESTS) {
+      return { ok: false, error: `Maximum of ${MAX_GUESTS} guests allowed.` };
+    }
+    pax = n;
+  }
+
   try {
     await prisma.$transaction(
       async (tx) => {
-        // Guest requests carry no exact times yet — the slot's default window
-        // decides whether the date is still open to request.
-        await assertNoConflict(tx, { date, endDate, slot });
-        await tx.booking.create({
+        const existing = await tx.booking.findUnique({ where: { id } });
+        if (!existing) throw new ConflictError("That booking no longer exists.");
+        if (existing.status === "CANCELLED") {
+          throw new ConflictError("Cancelled bookings can't be edited.");
+        }
+
+        await assertNoConflict(tx, { date, endDate, slot, startTime, endTime }, id);
+
+        await tx.booking.update({
+          where: { id },
           data: {
             slot,
-            status: "PENDING",
-            source: "GUEST",
             date: dateKeyToUTC(date),
             endDate: dateKeyToUTC(endDate),
+            startTime,
+            endTime,
             functionHallAircon,
             guestName,
             guestPhone,
@@ -337,21 +494,11 @@ export async function createRequest(
     ) {
       return {
         ok: false,
-        error: "Those dates were just taken. Please pick another.",
+        error: "That slot was just booked by someone else. Please refresh.",
       };
     }
     throw error;
   }
-
-  await notifyNewBooking({
-    slot,
-    date,
-    endDate,
-    guestName,
-    pax,
-    status: "PENDING",
-    isRequest: true,
-  });
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/calendar");
@@ -383,8 +530,17 @@ export async function confirmBooking(
     return { ok: false, error: (e as Error).message };
   }
 
+  let confirmed: {
+    reference: string;
+    guestName: string;
+    guestEmail: string | null;
+    slot: BookingSlot;
+    date: string;
+    endDate: string;
+  };
+
   try {
-    await prisma.$transaction(
+    confirmed = await prisma.$transaction(
       async (tx) => {
         const booking = await tx.booking.findUnique({ where: { id } });
         if (!booking) throw new ConflictError("That request no longer exists.");
@@ -406,12 +562,34 @@ export async function confirmBooking(
           where: { id },
           data: { status: "CONFIRMED", startTime, endTime },
         });
+
+        return {
+          reference: booking.reference,
+          guestName: booking.guestName,
+          guestEmail: booking.guestEmail,
+          slot: booking.slot,
+          date: toDateKey(booking.date),
+          endDate: toDateKey(booking.endDate),
+        };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
   } catch (error) {
     if (error instanceof ConflictError) return { ok: false, error: error.message };
     throw error;
+  }
+
+  if (confirmed.guestEmail) {
+    await sendBookingConfirmedEmail({
+      to: confirmed.guestEmail,
+      guestName: confirmed.guestName,
+      reference: confirmed.reference,
+      slot: confirmed.slot,
+      date: confirmed.date,
+      endDate: confirmed.endDate,
+      startTime,
+      endTime,
+    });
   }
 
   revalidatePath("/dashboard");
@@ -431,10 +609,26 @@ async function setCancelled(formData: FormData): Promise<void> {
   const id = String(formData.get("id") ?? "");
   if (!id) throw new Error("Missing booking id");
 
+  const before = await prisma.booking.findUnique({ where: { id } });
+
   await prisma.booking.update({
     where: { id },
     data: { status: "CANCELLED" },
   });
+
+  // Only email for an actual decline of a guest-submitted request — a staff
+  // member cancelling an already-confirmed stay is handled directly with the
+  // guest, not through an automated notice.
+  if (before && before.status === "PENDING" && before.source === "GUEST" && before.guestEmail) {
+    await sendRequestDeclinedEmail({
+      to: before.guestEmail,
+      guestName: before.guestName,
+      reference: before.reference,
+      slot: before.slot,
+      date: toDateKey(before.date),
+      endDate: toDateKey(before.endDate),
+    });
+  }
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/calendar");

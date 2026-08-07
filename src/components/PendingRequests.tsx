@@ -45,6 +45,9 @@ export function PendingRequests({ requests }: { requests: BookingLite[] }) {
                   </span>
                 )}
               </p>
+              <p className="font-mono text-[10px] tracking-wide text-navy-400">
+                {b.reference}
+              </p>
               <p className="text-xs font-medium text-navy-600">
                 {SLOT_LABELS[b.slot]}
                 {b.pax ? ` · ${b.pax} pax` : ""}
