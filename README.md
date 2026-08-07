@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Private Resort Booking System
 
-## Getting Started
+A booking management platform built for a private resort that previously took reservations by hand over Messenger. Staff manage a shared calendar and confirm guest requests; guests submit booking requests through a public form and can look up their status with a reference code — no account required.
 
-First, run the development server:
+## Why this exists
+
+The resort offers three overlapping booking types — day tours, night tours, and overnight stays — each with different, midnight-crossing time windows, plus multi-day stays and an optional function hall add-on. Preventing double-bookings across all of that isn't a simple date-equality check: two reservations can be on "different days" and still overlap the same physical timeslot. This project's core is that scheduling logic.
+
+## Features
+
+- **Public booking requests** — guests submit a request (dates, slot, guest count, add-ons) without creating an account, and can track its status later with a reference code
+- **Staff dashboard** — calendar view of all bookings, quick-add, request approval/decline, and exact check-in/check-out time entry once a booking is confirmed
+- **Conflict-free scheduling** — bookings are modeled as absolute time intervals (not calendar-day buckets), so overlap detection works correctly across multi-day stays and slots that cross midnight
+- **Role-based access** — admin vs. guest roles via NextAuth, with dashboard/booking routes restricted to admins
+- **Rate limiting** on public-facing booking endpoints to curb abuse
+- **Push notifications** — resort owners get a web push alert (PWA, installable) when a new booking request comes in
+- **Email notifications** via Resend for booking confirmations
+
+## Technical highlights
+
+- **Interval-based availability engine** (`src/lib/booking.ts`): each booking's slot (day/night/overnight) maps to a default time window; once staff enter exact times, all bookings collapse to `[start, end)` intervals on a shared timeline, and conflicts are pure interval-overlap checks. This correctly handles overnight/night slots that span two calendar days. Covered by a [Vitest suite](src/lib/booking.test.ts) exercising the midnight-crossing and multi-day edge cases.
+- **Two booking origins, one model**: staff-entered and guest-submitted bookings share a schema (`BookingSource: STAFF | GUEST`) with a request → confirm lifecycle (`PENDING → CONFIRMED/CANCELLED`).
+- **PWA + Web Push**: installable app shell with VAPID-keyed push subscriptions per device, so owners are notified in real time without a native app.
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 16 (App Router) |
+| Language | TypeScript |
+| UI | React 19, Tailwind CSS 4 |
+| Database / ORM | PostgreSQL (Neon) via Prisma |
+| Auth | NextAuth v5 |
+| Email | Resend |
+| Push | Web Push API (VAPID) |
+
+## Getting started
 
 ```bash
+npm install
+npx prisma migrate deploy
+npm run create-admin   # seeds an initial admin user
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Run the test suite with:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm test
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Requires a `.env` with:
 
-## Learn More
+```
+DATABASE_URL=
+AUTH_SECRET=
+RESEND_API_KEY=
+EMAIL_FROM=
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Roadmap
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [ ] Payment/deposit tracking
+- [ ] SMS notifications as a fallback to push
+- [ ] Booking analytics for the owner dashboard
