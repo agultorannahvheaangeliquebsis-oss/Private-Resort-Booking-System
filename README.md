@@ -43,36 +43,3 @@ The resort offers three overlapping booking types — day tours, night tours, an
 | Auth | NextAuth v5 |
 | Email | Resend |
 | Push | Web Push API (VAPID) |
-
-## Getting started
-
-```bash
-npm install
-npx prisma migrate deploy
-npm run create-admin   # seeds an initial admin user
-npm run dev
-```
-
-Run the test suite with:
-
-```bash
-npm test
-```
-
-Requires a `.env` with:
-
-```
-DATABASE_URL=
-AUTH_SECRET=
-RESEND_API_KEY=
-EMAIL_FROM=
-NEXT_PUBLIC_VAPID_PUBLIC_KEY=
-VAPID_PRIVATE_KEY=
-VAPID_SUBJECT=
-```
-
-## Roadmap
-
-- [ ] Payment/deposit tracking
-- [ ] SMS notifications as a fallback to push
-- [ ] Booking analytics for the owner dashboard
